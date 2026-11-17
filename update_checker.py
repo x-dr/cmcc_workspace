@@ -15,9 +15,9 @@ from urllib.request import Request, urlopen
 from flask import jsonify
 from runtime_paths import FROZEN, VERSION
 
-REPOSITORY = 'https://github.com/pppyl/lingxi-workspace'
+REPOSITORY = 'https://github.com/x-dr/cmcc_workspace'
 RELEASES_URL = REPOSITORY + '/releases'
-API_URL = 'https://api.github.com/repos/pppyl/lingxi-workspace/releases/latest'
+API_URL = 'https://api.github.com/repos/x-dr/cmcc_workspace/releases/latest'
 CHECK_INTERVAL = 6 * 3600
 MANUAL_INTERVAL = 60
 
@@ -51,9 +51,11 @@ class UpdateChecker:
         self.fetcher, self.now = fetcher or fetch_release, now or time.time
         self.lock, self.quit, self.thread = RLock(), Event(), None
         self.checking = False
-        self.data = (storage.load_update_check() if storage is not None else None) or {
-            'release': None, 'etag': '', 'checked_at': 0, 'last_attempt_at': 0, 'next_check_at': 0, 'error': '',
-        }
+        self.data = (storage.load_update_check() if storage is not None else None) or {}
+        if self.data.get('repository') != REPOSITORY:
+            self.data = {'repository': REPOSITORY, 'release': None, 'etag': '', 'checked_at': 0,
+                         'last_attempt_at': 0, 'next_check_at': 0, 'error': ''}
+            self._save()
 
     def _save(self):
         if self.storage is not None:

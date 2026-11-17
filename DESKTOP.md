@@ -20,4 +20,4 @@
 
 如启动失败，检查是否完整解压，并查看数据目录中的 `desktop.log`。首次解压包未携带数字签名。
 
-源代码与发布：https://github.com/pppyl/lingxi-workspace
+源代码与发布：https://github.com/x-dr/cmcc_workspace

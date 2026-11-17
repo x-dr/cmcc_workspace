@@ -36,7 +36,7 @@ Python + Flask 本地网页，默认地址 http://127.0.0.1:5500/ 。
 
 错误尝试后依次等待 5、10、30、60、120、180、300 秒，之后每次最多等待 5 分钟。等待由服务端统一执行并保存，跨 IP、IPv4／IPv6、刷新页面、清除 Cookie 或重启服务都不能绕过；等待期间的请求不会延长等待。正确登录后重置错误次数。此规则同样用于验证修改密码时输入的旧密码，已登录设备的业务和后台任务不受等待影响。
 
-版本检测使用 `pppyl/lingxi-workspace` 的 GitHub 正式 Release。服务启动后检查，之后每 6 小时检查一次；结果及 ETag 保存在本地数据库，重启和页面刷新复用缓存。界面右上角显示当前版本，发现新版时显示提示；「平台管理 → 版本更新」可手动检查、查看更新内容并下载对应的 Windows EXE、安卓 APK 或源码 ZIP。手动检查至少间隔一分钟，多设备共用同一次检查；网络失败会提示，不会误报“已是最新”。
+版本检测使用 `x-dr/cmcc_workspace` 的 GitHub 正式 Release。服务启动后检查，之后每 6 小时检查一次；结果及 ETag 按仓库保存在本地数据库，重启和页面刷新复用缓存，切换仓库时清除旧仓库的版本缓存。界面右上角显示当前版本，发现新版时显示提示；「平台管理 → 版本更新」可手动检查、查看更新内容并下载对应的 Windows EXE、安卓 APK 或源码 ZIP。手动检查至少间隔一分钟，多设备共用同一次检查；网络失败会提示，不会误报“已是最新”。
 
 更新需要用户下载安装：Windows 先退出托盘旧客户端，再运行新版；安卓使用同一签名覆盖安装，保留数据；源码服务更新程序文件时保留本地数据目录。程序不会自动覆盖正在运行的文件或清除账号、凭据及任务。
 
@@ -44,7 +44,7 @@ Python + Flask 本地网页，默认地址 http://127.0.0.1:5500/ 。
 
 卡券使用按官方协议类型复用，不按面额逐张适配。不同兑换接口、短信模板及待核实记录的处理见 [卡券兑换协议](COUPON_PROTOCOLS.md)。
 
-直接从 [GitHub Releases](https://github.com/pppyl/lingxi-workspace/releases/latest) 下载 `LingxiWorkspace-1.9.0-Windows-x64.exe`，双击运行，可直接转发给其他人。无需安装 Python 或 Node.js，界面在系统默认浏览器中打开；v1.0.1 起不再捆绑 Chrome。周三活动设备组件使用已安装的 Chrome 或 Edge，不读取日常浏览器登录数据。也提供 `LingxiWorkspace-1.9.0-Windows-x64.zip` 文件夹版，完整解压后双击其中的 `LingxiWorkspace.exe`，并保留旁边的 `_internal` 文件夹。
+直接从 [GitHub Releases](https://github.com/x-dr/cmcc_workspace/releases/latest) 下载 `LingxiWorkspace-1.9.0-Windows-x64.exe`，双击运行，可直接转发给其他人。无需安装 Python 或 Node.js，界面在系统默认浏览器中打开；v1.0.1 起不再捆绑 Chrome。周三活动设备组件使用已安装的 Chrome 或 Edge，不读取日常浏览器登录数据。也提供 `LingxiWorkspace-1.9.0-Windows-x64.zip` 文件夹版，完整解压后双击其中的 `LingxiWorkspace.exe`，并保留旁边的 `_internal` 文件夹。
 
 关闭标签页后客户端留在托盘继续执行定时任务，再次运行时复用已打开的页面，右键托盘图标可退出。启动时确认本地页面可访问后才打开浏览器；客户端 Cookie 名称与源码网页服务分离。账号及任务保存在 `%LOCALAPPDATA%\LingxiWorkspace`，与程序文件分离，升级无需搬运账号库。更新前先退出旧版本，首次使用登录自己的手机号。详细说明见 [DESKTOP.md](DESKTOP.md)。
 
@@ -52,7 +52,7 @@ Python + Flask 本地网页，默认地址 http://127.0.0.1:5500/ 。
 
 ## Android 独立版下载
 
-在 [GitHub Releases](https://github.com/pppyl/lingxi-workspace/releases/latest) 下载 `LingxiWorkspace-1.9.0-Android-arm64.apk`，适用于 Android 7.0+ ARM64 手机。服务、账号和任务在手机本机运行，不需要连接电脑；更新时使用同一签名覆盖安装，保留本机数据。后台任务受系统电池策略影响，详细说明与构建方式见 [ANDROID.md](ANDROID.md)。
+在 [GitHub Releases](https://github.com/x-dr/cmcc_workspace/releases/latest) 下载 `LingxiWorkspace-1.9.0-Android-arm64.apk`，适用于 Android 7.0+ ARM64 手机。服务、账号和任务在手机本机运行，不需要连接电脑；更新时使用同一签名覆盖安装，保留本机数据。后台任务受系统电池策略影响，详细说明与构建方式见 [ANDROID.md](ANDROID.md)。
 
 ## 页面与使用
 

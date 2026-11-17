@@ -98,6 +98,34 @@ class UpdateCheckerTests(unittest.TestCase):
             self.assertEqual(wait(restarted)['release'], original)
             self.fetch.assert_called_with('test-etag')
 
+    def test_repository_change_discards_old_release_and_etag_before_checking(self):
+        for repository in (None, 'https://github.com/previous/project'):
+            with self.subTest(repository=repository), tempfile.TemporaryDirectory() as folder:
+                storage = DatabaseLoginStorage(Path(folder)/'accounts.sqlite3')
+                checker = self.checker(storage=storage)
+                checker.request_check()
+                wait(checker)
+                cached = deepcopy(checker.data)
+                if repository is None:
+                    cached.pop('repository')
+                else:
+                    cached['repository'] = repository
+                cached['release']['url'] = 'https://github.com/previous/project/releases/tag/v1.4.0'
+                storage.save_update_check(cached)
+                self.clock[0] += 10
+                self.fetch.reset_mock()
+                restarted = UpdateChecker(storage, current_version='1.3.0',
+                                          now=lambda:self.clock[0], fetcher=self.fetch)
+                status = restarted.status()
+                self.assertIsNone(status['release'])
+                self.assertFalse(status['available'])
+                self.assertEqual(status['checked_at'], 0)
+                self.assertEqual(storage.load_update_check()['repository'], REPOSITORY)
+                self.assertEqual(storage.load_update_check()['etag'], '')
+                restarted.request_check()
+                self.assertTrue(wait(restarted)['available'])
+                self.fetch.assert_called_once_with('')
+
     def test_manual_check_has_a_shared_cooldown_and_failure_preserves_last_known_release(self):
         checker = self.checker()
         checker.request_check()
@@ -135,6 +163,7 @@ class UpdateCheckerTests(unittest.TestCase):
         with patch('update_checker.urlopen', side_effect=HTTPError('url', 304, 'same', {}, None)) as opener:
             self.assertEqual(fetch_release('known-etag'), (False, 'known-etag'))
         request = opener.call_args.args[0]
+        self.assertEqual(request.full_url, 'https://api.github.com/repos/x-dr/cmcc_workspace/releases/latest')
         self.assertEqual(request.get_header('If-none-match'), 'known-etag')
         self.assertIsNone(request.get_header('Authorization'))
         self.assertIsNone(request.get_header('Cookie'))

@@ -14,8 +14,8 @@ from urllib.error import HTTPError
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from runtime_paths import VERSION
-OWNER='pppyl'
-NAME='lingxi-workspace'
+OWNER='x-dr'
+NAME='cmcc_workspace'
 
 
 def main():

@@ -18,10 +18,10 @@ const find=(node,predicate)=>predicate(node)?node:node.children.map(child=>find(
 const cls=(node,name)=>find(node,item=>item.className?.split(' ').includes(name));
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function status(available=true){
-  const asset={platform:'windows',name:'Windows.exe',url:'https://github.com/pppyl/lingxi-workspace/releases/download/v1.4.0/Windows.exe'};
+  const asset={platform:'windows',name:'Windows.exe',url:'https://github.com/x-dr/cmcc_workspace/releases/download/v1.4.0/Windows.exe'};
   return {current_version:'1.3.0',platform:'windows',available,checking:false,checked_at:1000,retry_after:0,error:'',
-    release:{version:available?'1.4.0':'1.3.0',notes:'<script>unsafe()</script>\n更新说明',assets:[asset],url:'https://github.com/pppyl/lingxi-workspace/releases/tag/v1.4.0'},
-    recommended:asset,releases_url:'https://github.com/pppyl/lingxi-workspace/releases'};
+    release:{version:available?'1.4.0':'1.3.0',notes:'<script>unsafe()</script>\n更新说明',assets:[asset],url:'https://github.com/x-dr/cmcc_workspace/releases/tag/v1.4.0'},
+    recommended:asset,releases_url:'https://github.com/x-dr/cmcc_workspace/releases'};
 }
 async function fixture(initial=status(),store=new Map()){
   const body=new Element('body'),head=new Element('head'),top=new Element(),panel=new Element();
@@ -43,7 +43,7 @@ test('new release adds a visible notice, current version badge and correct downl
   assert.equal(ui.notice.hidden,false);
   assert.match(ui.notice.children[1].textContent,/1.4.0/);
   const download=cls(ui.dialog,'update-primary');
-  assert.match(download.href,/github\.com\/pppyl\/lingxi-workspace\/releases\/download/);
+  assert.match(download.href,/github\.com\/x-dr\/cmcc_workspace\/releases\/download/);
   assert.match(download.textContent,/下载更新/);
   assert.match(cls(ui.dialog,'update-guide').textContent,/先从托盘退出/);
   assert.equal(cls(ui.dialog,'update-notes').textContent,'<script>unsafe()</script>\n更新说明');

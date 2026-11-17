@@ -17,7 +17,7 @@
   const close=button('',()=>dialog.close(),'update-icon-close');close.innerHTML=closeIcon;close.setAttribute('aria-label','关闭版本信息');heading.append(title,close);
   const versions=create('p','update-versions'),message=create('p','update-message'),guide=create('p','update-guide'),links=create('div','update-downloads');
   const notes=create('div','update-notes'),actions=create('div','update-actions'),check=button('检查更新',()=>load(true));
-  const releaseLink=create('a','update-secondary','GitHub 发布页');releaseLink.href='https://github.com/pppyl/lingxi-workspace/releases';releaseLink.target='_blank';releaseLink.rel='noopener noreferrer';
+  const releaseLink=create('a','update-secondary','GitHub 发布页');releaseLink.href='https://github.com/x-dr/cmcc_workspace/releases';releaseLink.target='_blank';releaseLink.rel='noopener noreferrer';
   actions.append(check,releaseLink);dialog.append(heading,versions,message,guide,links,notes,actions);document.body.append(dialog);
   const panel=document.getElementById('updates-settings');
   let panelVersions,panelMessage,panelLinks,panelCheck;
