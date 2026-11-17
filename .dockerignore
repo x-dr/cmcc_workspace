@@ -1,0 +1,26 @@
+# Only send runtime source and public assets to the image builder.
+**
+!/*.py
+!/requirements.txt
+!/app_login_public_key.json
+!/mobile_rights_gateway.json
+!/templates/
+!/templates/**
+!/static/
+!/static/**
+!/recharge/
+!/recharge/**
+!/activities/
+!/activities/**
+
+**/tests/
+**/__pycache__/
+**/node_modules/
+**/.local/
+**/.cache/
+**/.env*
+**/*.py[cod]
+**/*.sqlite*
+**/*.db
+**/*.db-*
+**/credentials.key

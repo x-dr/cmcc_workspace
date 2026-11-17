@@ -15,6 +15,9 @@ tools/wire-env/
 
 recharge/.local/
 .local/
+/.env
+/docker-data/
+/backup-*/
 .build/
 dist/
 release/

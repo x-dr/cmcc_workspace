@@ -2,6 +2,8 @@
 
 Linux 使用 Python 本地网页服务入口 `app.py`，无需桌面环境。后台任务由同一个 Python 进程执行，关闭页面后继续运行，停止服务后暂停。
 
+也可使用 Docker／Compose 运行，镜像构建、数据迁移和 GitHub Actions 操作见 [Docker 部署说明](DOCKER.md)。
+
 ## 安装与启动
 
 使用 Python 3.12 或更高版本。以 Debian／Ubuntu 为例，先安装虚拟环境支持：
