@@ -1,59 +1,14 @@
-"""SQLite account storage with Windows-user-bound encrypted credentials."""
+"""SQLite account storage with platform-specific encrypted credentials."""
 from __future__ import annotations
 
-import ctypes
-from ctypes import wintypes
 import json
 import os
 from pathlib import Path
 import sqlite3
+import sys
 from threading import RLock
 
-
-class LoginStorageError(Exception):
-    pass
-
-
-def _dpapi(data: bytes, *, decrypt=False) -> bytes:
-    if os.environ.get('LINGXI_ANDROID') == '1':
-        from java import jclass
-        vault = jclass('cn.pppyl.lingxiworkspace.CredentialVault')
-        return bytes(vault.decrypt(data) if decrypt else vault.encrypt(data))
-    if os.name != 'nt':
-        raise LoginStorageError('当前系统不支持 Windows 登录态加密，账号仅保留在内存中。')
-
-    class Blob(ctypes.Structure):
-        _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
-
-    def blob(value):
-        buffer = ctypes.create_string_buffer(value)
-        return Blob(len(value), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))), buffer
-
-    source, source_buffer = blob(data)
-    entropy, entropy_buffer = blob(b'lingxi-web/shared-app-login/v1')
-    output = Blob()
-    crypt = ctypes.WinDLL('crypt32', use_last_error=True)
-    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-    kernel.LocalFree.argtypes = [wintypes.HLOCAL]
-    kernel.LocalFree.restype = wintypes.HLOCAL
-    if decrypt:
-        function = crypt.CryptUnprotectData
-        function.argtypes = [ctypes.POINTER(Blob), ctypes.c_void_p, ctypes.POINTER(Blob),
-                             ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
-        args = [ctypes.byref(source), None, ctypes.byref(entropy), None, None, 1, ctypes.byref(output)]
-    else:
-        function = crypt.CryptProtectData
-        function.argtypes = [ctypes.POINTER(Blob), wintypes.LPCWSTR, ctypes.POINTER(Blob),
-                             ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(Blob)]
-        args = [ctypes.byref(source), 'Lingxi shared APP sessions', ctypes.byref(entropy), None, None, 1, ctypes.byref(output)]
-    function.restype = wintypes.BOOL
-    if not function(*args):
-        raise LoginStorageError('无法读取本机加密登录态，请使用原 Windows 用户登录或重新验证账号。' if decrypt
-                                else '本机登录态加密失败，账号暂时仅保留在内存中。')
-    try:
-        return ctypes.string_at(output.data, output.size)
-    finally:
-        kernel.LocalFree(ctypes.cast(output.data, wintypes.HLOCAL))
+from credential_protection import FileCredentialCipher, LoginStorageError, _dpapi
 
 
 class DatabaseLoginStorage:
@@ -63,7 +18,7 @@ class DatabaseLoginStorage:
         self.unprotect = unprotect or (lambda data: _dpapi(data, decrypt=True))
         self.lock = RLock()
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             with self._connect() as connection:
                 connection.execute('PRAGMA journal_mode=WAL')
                 connection.execute('CREATE TABLE IF NOT EXISTS account_sessions '
@@ -99,6 +54,15 @@ class DatabaseLoginStorage:
                     '(id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)')
                 connection.execute('CREATE TABLE IF NOT EXISTS network_settings '
                     '(id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)')
+                if (sys.platform.startswith('linux') and os.environ.get('LINGXI_ANDROID') != '1'
+                        and (protect is None or unprotect is None)):
+                    encrypted_tables = ('account_sessions', 'lingxi_tasks', 'checkin_data', 'monthly_coupon_data',
+                        'star_day_data', 'activity_state', 'credential_sessions', 'platform_registry', 'coupon_use_data')
+                    has_data = any(connection.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone()
+                                   for table in encrypted_tables)
+                    cipher = FileCredentialCipher(self.path.parent/'credentials.key', create=not has_data)
+                    self.protect = protect or cipher.encrypt
+                    self.unprotect = unprotect or cipher.decrypt
         except (sqlite3.Error, OSError) as error:
             raise LoginStorageError('无法打开本机账号数据库，请检查目录权限或数据库是否损坏。') from error
 
@@ -295,7 +259,7 @@ class DatabaseLoginStorage:
         except LoginStorageError:
             raise
         except (sqlite3.Error, OSError, ValueError, TypeError, UnicodeError) as error:
-            raise LoginStorageError('数据库中的加密登录态读取失败，已保留原数据；请检查数据库或原 Windows 用户。') from error
+            raise LoginStorageError('数据库中的加密登录态读取失败，已保留原数据；请检查数据库及对应的加密密钥或系统用户。') from error
 
     def save(self, accounts):
         try:

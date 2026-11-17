@@ -73,6 +73,6 @@ print(json.dumps({'database':str(DATA_DIR/'accounts.sqlite3'),'activity':str(REC
             env={key:value for key,value in os.environ.items() if key!='LINGXI_DATA_DIR'}
             env['LOCALAPPDATA']=folder
             result=subprocess.run([sys.executable,'-X','utf8','-c',
-                'import sys;sys.frozen=True;from runtime_paths import DATA_DIR;print(DATA_DIR)'],
+                'import sys;sys.frozen=True;sys.platform="win32";from runtime_paths import DATA_DIR;print(DATA_DIR)'],
                 capture_output=True,text=True,env=env,check=True)
             self.assertEqual(Path(result.stdout.strip()),Path(folder)/'LingxiWorkspace')

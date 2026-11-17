@@ -107,9 +107,10 @@ class ManagedHttpServer:
             if not fallback_if_occupied or not port or error.errno not in (errno.EADDRINUSE,10048):raise
             sockets = self._bind(hosts,0)
             manager.warning = f'端口 {port} 无法监听，已使用空闲端口。'
-        self.backend = create_server(application,sockets=sockets,threads=32,channel_timeout=240)
+        self.map = {}
+        self.backend = create_server(application,sockets=sockets,map=self.map,threads=32,channel_timeout=240)
         self.effective_port = sockets[0].getsockname()[1]
-        self.asyncore, self.adj, self.map = self.backend.asyncore,self.backend.adj,self.backend.map
+        self.asyncore, self.adj = self.backend.asyncore,self.backend.adj
         self.listeners = {s.effective_host:s for s in self.map.values() if isinstance(s,BaseWSGIServer)}
         for listener in self.listeners.values():listener.channel_class = self.channel_class
         manager.attach(self.effective_port,[(host,self.effective_port) for host in self.listeners],server=self)
@@ -119,8 +120,14 @@ class ManagedHttpServer:
         sockets = []
         try:
             for host in hosts:
-                listener = socket.create_server((host,port),family=socket.AF_INET6 if ':' in host else socket.AF_INET,
-                                                dualstack_ipv6=False)
+                try:
+                    listener = socket.create_server((host,port),family=socket.AF_INET6 if ':' in host else socket.AF_INET,
+                                                    dualstack_ipv6=False)
+                except OSError as error:
+                    if host in ('::','::1') and error.errno in (errno.EAFNOSUPPORT,errno.EPROTONOSUPPORT,errno.EADDRNOTAVAIL):
+                        logging.getLogger(__name__).warning('系统未启用 IPv6，跳过 %s 监听。',host)
+                        continue
+                    raise
                 sockets.append(listener)
                 port = listener.getsockname()[1]
         except OSError:

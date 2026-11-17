@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -100,7 +101,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(restored.get().name,'旧账号')
 
 
-@unittest.skipUnless(os.name == 'nt', 'Windows encrypted account database')
+@unittest.skipUnless(os.name == 'nt' or sys.platform.startswith('linux'), 'Native encrypted account database')
 class RecoveryIntegrationTests(unittest.TestCase):
     def setUp(self):
         def refreshed(flow):

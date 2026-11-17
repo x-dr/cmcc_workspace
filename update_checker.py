@@ -46,7 +46,8 @@ def fetch_release(etag):
 class UpdateChecker:
     def __init__(self, storage=None, *, current_version=VERSION, platform=None, fetcher=None, now=None):
         self.storage, self.current_version = storage, current_version
-        self.platform = platform or ('android' if os.environ.get('LINGXI_ANDROID') == '1' else 'windows' if FROZEN else 'source')
+        self.platform = platform or ('android' if os.environ.get('LINGXI_ANDROID') == '1'
+                                    else 'windows' if FROZEN and os.name == 'nt' else 'source')
         self.fetcher, self.now = fetcher or fetch_release, now or time.time
         self.lock, self.quit, self.thread = RLock(), Event(), None
         self.checking = False

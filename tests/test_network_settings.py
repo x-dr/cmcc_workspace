@@ -43,7 +43,9 @@ class NetworkSettingsTests(TestCase):
         records = [{'address':v,'interface_id':'nic-a','interface_name':'测试网卡'}
                    for v in ('192.168.31.176','2409:8a6a::1234','fe80::1','127.0.0.1')]
         manager = NetworkSettings()
-        with patch('network_interfaces._windows_addresses',return_value=records):
+        with patch('network_access.interface_addresses',return_value=[
+                {**row,'family':'ipv4' if ':' not in row['address'] else 'ipv6'}
+                for row in records if row['address'] not in ('fe80::1','127.0.0.1')]):
             value = manager.status(5500)
         self.assertEqual(value['ipv4'],['http://192.168.31.176:5500/'])
         self.assertEqual(value['ipv6'],['http://[2409:8a6a::1234]:5500/'])

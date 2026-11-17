@@ -22,7 +22,7 @@ def main():
     staging.mkdir(parents=True, exist_ok=True)
     modules = ('app app_login android_bridge android_runtime android_activity_bridge http_transport '
                'bill_query usage_query services_query mobile_rights mobile_rights_auth mobile_rights_client mobile_rights_gateway mobile_rights_points mobile_rights_youth member_benefits member_benefits_protocol checkin_client checkin_flash checkin_scheduler checkin_teams coupon_client coupon_use coupon_device coupon_reminders coupon_notices coupon_captcha coupon_cashier_h5 coupon_alipay alipay_h5 '
-               'lingxi_client lingxi_scheduler login_storage credential_cache network_access network_interfaces access_security monthly_coupon_auth monthly_coupon_client '
+               'lingxi_client lingxi_scheduler login_storage credential_protection credential_cache network_access network_interfaces access_security monthly_coupon_auth monthly_coupon_client '
                'monthly_coupon_scheduler star_day_client star_day_auth star_day_scheduler star_day_sms star_day_crypto '
                'platform_manager feature_control feature_runtime navigation_status runtime_paths session_maintenance unified_logins update_checker').split()
     for name in modules:
