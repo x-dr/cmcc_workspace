@@ -159,6 +159,8 @@ Python + Flask 本地网页，默认地址 http://127.0.0.1:5500/ 。
 
 账号管理弹窗添加账号不会替换灵犀的当前账号。各页面通过不含凭据的本机事件同步账号列表。验证码不保存，Cookie 和灵犀凭据不返回浏览器，使用 Windows 当前用户的 DPAPI 加密后存入本机 SQLite 数据库。
 
+短信登录收到官方 `214100` 时，账号管理页会显示官方人工滑块；用户操作通过后，Python 携带 `riskToken` 继续原来的登录，不重新发送短信。可以取消验证后继续；过期、重发短信或切换账号会使旧回调失效。验证后结果未确认时停止重复提交。当前已完成静态协议核对与本地模拟回归，真实官方滑块登录仍待人工实测，详见 [APP 登录协议与验证边界](APP_LOGIN_PROTOCOL.md)。
+
 ## 账号数据库与会话恢复
 
 数据库位置：项目根目录的 `.local/accounts.sqlite3`，无需另装数据库服务。`account_sessions` 保存稳定账号 ID、备注、脱敏号码和加密的 APP Cookie / 灵犀凭据 / APP 参数；`activity_accounts` 保存活动账号与共享账号 ID 的绑定。旧的 `recharge/.local/accounts.json` 账号目录会自动导入，之后写入数据库，原文件保留。定时任务和执行记录仍保存在 `recharge/.local/schedules.json`。

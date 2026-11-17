@@ -240,7 +240,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
             origin = request.headers.get("Origin")
             if origin and urlsplit(origin).netloc != request.host:
                 return jsonify(error="请求来源不正确。"), 403
-            if request.path.startswith('/coupon-verification/'):
+            if request.path.startswith(('/coupon-verification/', '/login-verification/')):
                 return None  # The fixed verification gateway validates its SDK form bodies.
             if not request.is_json:
                 return jsonify(error="请使用 JSON 请求。"), 415
@@ -256,7 +256,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
             "default-src 'self'; script-src 'self'; style-src 'self'; "
             "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
         )
-        if request.path == '/static/coupon-captcha.html':
+        if request.path in ('/static/coupon-captcha.html', '/static/login-captcha.html'):
             response.headers['Content-Security-Policy'] = (
                 "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                 "connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'self'"
@@ -722,6 +722,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
     @app.post("/api/login")
     @app.post('/api/logins/relogin')
     def login():
+        app_login_complete = False
         value = request.get_json(silent=True)
         relogin = request.path == '/api/logins/relogin'
         target = unified.get_id(value.get('id')) if relogin else None
@@ -758,7 +759,10 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
                         message = '验证码已更新，请填写最近收到的验证码。' if latest else '本次验证码已失效，请重新获取。'
                         return jsonify(error=message, code='SMS_FLOW_CHANGED', sms=latest), 409
                     flow = pending if pending is not None else login_flow()
-                    cookie = flow.login(phone, code)
+                    captcha = ({'risk_token': value.get('risk_token', ''), 'challenge_id': value.get('challenge_id', '')}
+                               if 'risk_token' in value or 'challenge_id' in value else {})
+                    cookie = flow.login(phone, code, **captcha)
+                    app_login_complete = True
                     token = ''
                     if features.enabled('lingxi'):
                         from feature_runtime import FeatureLease, feature_scope
@@ -779,11 +783,11 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
                 login_flows.pop(session["sid"], None)
             return jsonify(account=saved.public(), message='账号已重新登录，任务绑定和备注已保留' if relogin else '账号已加入共享账号池') if manage else jsonify(**current.status(), login_id=saved.id)
         except AppLoginError as exc:
-            return jsonify(error=str(exc), code=exc.code), 400
+            return jsonify(error=str(exc), code=exc.code, challenge=exc.challenge), 400
         except LingxiError as exc:
-            return jsonify(error=str(exc)), 400
+            return jsonify(error=str(exc), app_login_complete=app_login_complete), 400
         except RequestException:
-            return jsonify(error="连接灵犀登录服务失败，请稍后重试。"), 502
+            return jsonify(error="连接灵犀登录服务失败，请稍后重试。", app_login_complete=app_login_complete), 502
         finally:
             held_lock.release()
 

@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from flask import Flask
 
 from coupon_captcha import APP_ID, OFFICIAL_ORIGIN, register_coupon_captcha
+from app_login import LOGIN_CAPTCHA_APP_ID
 from http_transport import requests
 
 
@@ -119,6 +120,17 @@ class CouponCaptchaTests(unittest.TestCase):
         response = self.client.get('/coupon-verification/mgt/decision-captcha/zw-captcha/index.js')
         self.assertEqual(response.status_code, 502)
         self.assertNotIn('Location', response.headers)
+
+    def test_login_resources_share_only_public_captcha_transport_and_have_separate_app_id(self):
+        for name in ('wallet/index-private-web_a54cc0c.js', 'wallet/udid/c1',
+                     'mgt/decision-captcha/api/logo/'+APP_ID):
+            self.assertEqual(self.client.get('/login-verification/'+name).status_code, 404)
+        self.assertEqual(self.session.calls, [])
+        path = '/login-verification/mgt/decision-captcha/api/logo/'+LOGIN_CAPTCHA_APP_ID
+        self.assertEqual(self.client.get(path).status_code, 200)
+        self.assertEqual(self.client.get('/coupon-verification/mgt/decision-captcha/api/logo/'+LOGIN_CAPTCHA_APP_ID).status_code, 404)
+        self.assertEqual(self.client.post('/login-verification/mgt/decision-captcha/api/a').status_code, 405)
+        self.assertEqual(self.client.post('/login-verification/mgt/decision-captcha/api/v1', data=b'human-input').status_code, 200)
 
     def test_network_error_does_not_echo_challenge_parameters(self):
         self.session.error = requests.RequestsError('private challenge parameter')

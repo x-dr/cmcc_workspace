@@ -1,4 +1,4 @@
-"""Fixed-origin transport for the official, human-operated coupon captcha.
+"""Fixed-origin transport for official, human-operated China Mobile captchas.
 
 The browser supplies all challenge data. This module neither solves challenges
 nor changes their origin, response, or verification tokens.
@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from flask import Response, jsonify, request
 
 from http_transport import requests
+from app_login import LOGIN_CAPTCHA_APP_ID
 
 
 OFFICIAL_ORIGIN = 'https://yxfk.market.chinamobile.com:8081'
@@ -29,16 +30,20 @@ def register_coupon_captcha(app, *, session_factory=None):
     factory = session_factory or requests.Session
     app_ids = app.extensions.setdefault('coupon_captcha_app_ids', {APP_ID})
 
-    @app.route('/coupon-verification/<path:resource>', methods=['GET', 'POST'])
-    def coupon_verification_proxy(resource):
+    @app.route('/coupon-verification/<path:resource>', defaults={'login': False}, methods=['GET', 'POST'])
+    @app.route('/login-verification/<path:resource>', defaults={'login': True}, methods=['GET', 'POST'])
+    def coupon_verification_proxy(resource, login):
         # Validate the only untrusted routing input at this boundary.
         if (not re.fullmatch(r'[A-Za-z0-9_./-]+', resource)
                 or any(part in ('', '.', '..') for part in resource.split('/'))):
             return jsonify(error='验证资源地址无效。'), 404
         is_static = (resource.startswith(CAPTCHA_ROOT+'/zw-captcha/')
                      and PurePosixPath(resource).suffix.lower() in STATIC_EXTENSIONS)
+        allowed_ids = {LOGIN_CAPTCHA_APP_ID} if login else app_ids
         is_logo = (resource.startswith(CAPTCHA_ROOT+'/api/logo/')
-                   and resource.rsplit('/', 1)[-1] in app_ids)
+                   and resource.rsplit('/', 1)[-1] in allowed_ids)
+        if login and resource in WALLET_RESOURCES:
+            return jsonify(error='不支持的登录验证资源。'), 404
         if resource == 'wallet/index-private-web_a54cc0c.js':
             methods = {'GET'}
         elif resource == 'wallet/udid/c1':
