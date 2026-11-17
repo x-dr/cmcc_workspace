@@ -37,7 +37,7 @@ jobs:
             echo '::error::Invalid Docker image tag'
             exit 1
           fi
-          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "name=ghcr.io/x-dr/cmcc_workspace" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 

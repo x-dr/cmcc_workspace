@@ -6,7 +6,7 @@
 
 将本次文件同步到 GitHub 默认分支后，在仓库 **Actions → Docker image → Run workflow** 手动执行。普通提交不触发镜像发布，也不创建 Release 或打包桌面／安卓客户端。
 
-镜像发布到 `ghcr.io/<仓库所有者>/<仓库名>`，当前仓库对应 `ghcr.io/pppyl/lingxi-workspace`。工作流使用自带的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需配置 Docker Hub 账号或额外令牌；仓库／组织策略需要允许 GitHub Actions 写入 Packages。
+镜像固定发布到 `ghcr.io/x-dr/cmcc_workspace`。工作流使用自带的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需配置 Docker Hub 账号；执行工作流的仓库必须具有该 GHCR 包的写入权限。
 
 运行时填写镜像标签，默认 `latest`；例如填写 `1.9.0` 就发布 `:1.9.0`，同时生成 `:sha-<完整提交号>`。只有填写 `latest` 时才更新 `:latest`，镜像标签不修改程序内置版本。支持 `linux/amd64` 和 `linux/arm64`。
 
@@ -18,7 +18,13 @@
 
 ## 拉取与启动
 
-需要 Docker Engine 和 Docker Compose 插件。镜像须先通过上面的工作流发布成功。在保存 `compose.yaml` 的项目目录执行：
+需要 Docker Engine 和 Docker Compose 插件。拉取默认 `latest` 标签：
+
+```bash
+docker pull ghcr.io/x-dr/cmcc_workspace
+```
+
+镜像须已发布成功。在保存 `compose.yaml` 的项目目录执行：
 
 ```bash
 docker compose config --quiet
@@ -34,7 +40,7 @@ docker compose logs --tail=100 lingxi
 ```dotenv
 LINGXI_BIND_ADDRESS=0.0.0.0
 LINGXI_PORT=5500
-LINGXI_IMAGE=ghcr.io/pppyl/lingxi-workspace:latest
+LINGXI_IMAGE=ghcr.io/x-dr/cmcc_workspace:latest
 ```
 
 然后重新执行 `docker compose up -d --no-build --wait`。`LINGXI_PORT` 配置宿主机端口，容器内固定为 `5500`；容器中的 `LINGXI_HOST` 由环境固定，平台管理不能修改容器监听地址。网卡列表显示容器网络，实际访问地址以宿主机端口映射为准。需要公网访问时按实际范围设置防火墙；也可保持默认本机绑定，由宿主机反向代理提供 HTTPS。

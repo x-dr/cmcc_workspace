@@ -1,6 +1,6 @@
 services:
   lingxi:
-    image: ${LINGXI_IMAGE:-ghcr.io/pppyl/lingxi-workspace:latest}
+    image: ${LINGXI_IMAGE:-ghcr.io/x-dr/cmcc_workspace:latest}
     build:
       context: .
     restart: unless-stopped
