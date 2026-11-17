@@ -535,7 +535,7 @@ class SchedulerTests(unittest.TestCase):
 
 class RouteTests(unittest.TestCase):
     def test_page_status_and_input_errors_with_empty_shared_pool(self):
-        from app import create_app
+        from workspace_test_support import create_app
         app=create_app();http=app.test_client()
         response=http.get('/star-day')
         self.assertEqual(response.status_code,200)

@@ -19,9 +19,9 @@
   }
   function render(state){
     configured=state.configured;local=state.local;
-    if(!settings&&configured&&(state.local||state.authenticated)){location.replace(destination());return;}
-    $('access-title').textContent=settings?'访问密码':configured?'远程访问登录':'设置访问密码';
-    $('access-description').textContent=settings?'非本机访问需要密码。本机回环访问可直接使用。':configured?'请输入访问密码，继续使用本地工具台。':'首次访问尚未设置密码。请先完成设置，再进入工作台。';
+    if(!settings&&state.authenticated){location.replace(destination());return;}
+    $('access-title').textContent=settings?'访问密码':configured?'后台登录':'设置访问密码';
+    $('access-description').textContent=settings?'本机和远程访问均需密码登录，登录状态最长保留 7 天。':configured?'请输入访问密码，继续使用本地工具台。':'首次访问尚未设置密码。请先完成设置，再进入工作台。';
     $('access-current-field').hidden=!settings||!configured;
     $('access-current-password').required=settings&&configured;
     $('access-confirmation-field').hidden=!settings&&configured;
@@ -29,8 +29,9 @@
     $('access-password-label').textContent=settings&&configured?'新访问密码':configured?'访问密码':'访问密码（至少 8 位）';
     $('access-password').autocomplete=settings||!configured?'new-password':'current-password';
     $('access-password').minLength=settings||!configured?8:1;
-    if($('access-logout'))$('access-logout').hidden=state.local||!state.authenticated;
+    if($('access-logout'))$('access-logout').hidden=!state.authenticated;
     form.hidden=false;countdown(state.retry_after);
+    if(!settings)$('access-password').focus();
   }
   form.addEventListener('submit',async event=>{
     event.preventDefault();if(busy||Date.now()<deadline)return;
@@ -47,8 +48,13 @@
     finally{busy=false;countdown();}
   });
   $('access-logout')?.addEventListener('click',async()=>{
-    await fetch('/api/access/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    location.replace('/access');
+    const button=$('access-logout');button.disabled=true;
+    try{
+      const response=await fetch('/api/access/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      if(!response.ok)throw new Error('退出失败，请稍后重试。');
+      location.replace('/access');
+    }catch(error){feedback(error.message);}
+    finally{button.disabled=false;}
   });
   fetch('/api/access/status').then(async response=>{if(!response.ok)throw new Error('无法读取访问设置，请刷新页面。');render(await response.json());})
     .catch(error=>{$('access-description').textContent=error.message;});

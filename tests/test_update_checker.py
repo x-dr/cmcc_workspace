@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
-from app import create_app
+from workspace_test_support import create_app
 from login_storage import DatabaseLoginStorage
 from update_checker import CHECK_INTERVAL, REPOSITORY, UpdateChecker, fetch_release, version_numbers
 
@@ -195,7 +195,7 @@ class UpdateApiTests(unittest.TestCase):
         checker.fetcher.assert_not_called()
         for path in ('/api/updates', '/api/updates/check'):
             response = client.get(path, base_url='http://public.example:5500', environ_overrides={'REMOTE_ADDR':'2001:db8::2'})
-            self.assertEqual(response.status_code, 428)
+        self.assertEqual(response.status_code, 401)
         response = client.post('/api/updates/check', json={})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(wait(checker)['available'])

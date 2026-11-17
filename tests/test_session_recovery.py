@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 from cryptography.fernet import Fernet
 from curl_cffi.requests.exceptions import ConnectionError
 
-from app import create_app
+from workspace_test_support import create_app
 from app_login import AppCredentialError
 from lingxi_client import LingxiError
 from login_storage import DatabaseLoginStorage, LoginStorageError, _dpapi

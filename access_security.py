@@ -94,6 +94,7 @@ class AccessSecurity:
 class AccessGate:
     PUBLIC = frozenset(('/access', '/api/access/status', '/api/access/login',
                         '/api/access/logout', '/static/access.js', '/static/access.css',
+                        '/static/mobile.js', '/static/mobile.css',
                         '/static/theme.js', '/static/theme.css', '/favicon.ico'))
 
     def __init__(self, application, security):
@@ -107,9 +108,13 @@ class AccessGate:
         error = None
         if not allowed:
             error = Response('不支持此访问地址。', status=403)
-        elif incoming.path.startswith('/_desktop/') and not local:
+        elif incoming.path.startswith('/_desktop/'):
+            if local:
+                # Native open/quit commands have their own bearer credential;
+                # they must still work before a browser signs in.
+                return self.application(environ, start_response)
             error = Response('客户端控制接口仅限本机访问。', status=403)
-        elif local or incoming.path in self.PUBLIC:
+        elif incoming.path in self.PUBLIC:
             return self.application(environ, start_response)
         else:
             state = self.security.status(local, incoming.cookies.get(COOKIE_NAME))
@@ -181,7 +186,7 @@ def register_access(app, storage):
 
     @app.post('/api/access/logout')
     def access_logout():
-        response = jsonify(message='已退出远程访问。')
+        response = jsonify(message='已退出后台登录，定时任务继续运行。')
         response.delete_cookie(COOKIE_NAME, path='/', samesite='Strict')
         return response
 

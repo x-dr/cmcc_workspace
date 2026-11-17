@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from app_login import (AppLoginSession, AppLoginError, AppCredentialError,
                        REFRESH_PATH, AUTH_REFRESH_PATH, INIT_PATH, merge_app_cookie)
-from app import create_app
+from workspace_test_support import create_app
 from unified_logins import UnifiedLogins
 from session_maintenance import SessionMaintenance
 from lingxi_client import LingxiError

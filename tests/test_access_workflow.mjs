@@ -7,6 +7,7 @@ class Element {
   constructor(){this.hidden=false;this.value='';this.handlers={};this.dataset={};this.classList={toggle(){}};}
   addEventListener(name,fn){this.handlers[name]=fn;}
   reset(){this.resetCalled=true;}
+  focus(){this.focused=true;}
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 async function fixture({configured=false,local=false,authenticated=false,retry_after=0,settings=false,next='/coupons'}={}){
@@ -73,9 +74,26 @@ test('platform password settings require current password, retain the page and a
   assert.equal(ui.calls.at(-1).url,'/api/access/logout');assert.deepEqual(ui.redirects,['/access']);
 });
 
-test('authenticated local entry returns to work and external redirect targets are rejected',async()=>{
-  const ui=await fixture({configured:true,local:true,next:'https://evil.test/'});
+test('local entry also requires login and authenticated external redirect targets are rejected',async()=>{
+  const local=await fixture({configured:true,local:true});
+  assert.deepEqual(local.redirects,[]);
+  assert.equal(local.get('access-title').textContent,'后台登录');
+  assert.equal(local.get('access-form').hidden,false);
+  const ui=await fixture({configured:true,local:true,authenticated:true,next:'https://evil.test/'});
   assert.deepEqual(ui.redirects,['/']);
   const signed=await fixture({configured:true,authenticated:true,next:'/recharge/?tab=tasks'});
   assert.deepEqual(signed.redirects,['/recharge/?tab=tasks']);
+});
+
+test('local settings allow logout and a failed logout keeps the page available for retry',async()=>{
+  const ui=await fixture({configured:true,local:true,authenticated:true,settings:true});
+  assert.equal(ui.get('access-logout').hidden,false);
+  ui.replies.push({ok:false});
+  await ui.get('access-logout').handlers.click();
+  assert.deepEqual(ui.redirects,[]);
+  assert.equal(ui.get('access-logout').disabled,false);
+  assert.equal(ui.get('access-feedback').textContent,'退出失败，请稍后重试。');
+  ui.replies.push({ok:true});
+  await ui.get('access-logout').handlers.click();
+  assert.deepEqual(ui.redirects,['/access']);
 });

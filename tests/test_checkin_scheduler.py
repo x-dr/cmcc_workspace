@@ -504,7 +504,7 @@ class CheckinSchedulerTests(unittest.TestCase):
 
 class CheckinApiTests(unittest.TestCase):
     def setUp(self):
-        from app import create_app
+        from workspace_test_support import create_app
         self.app = create_app()
         self.client = self.app.test_client()
         self.addCleanup(self.app.extensions['checkin_scheduler'].shutdown)

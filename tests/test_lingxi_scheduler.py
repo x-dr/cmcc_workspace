@@ -11,7 +11,7 @@ from unittest.mock import Mock,patch
 
 from cryptography.fernet import Fernet
 
-from app import create_app
+from workspace_test_support import create_app
 from lingxi_scheduler import LingxiScheduler,TaskError,SHANGHAI,validate_plan
 from login_storage import DatabaseLoginStorage,LoginStorageError
 

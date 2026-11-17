@@ -92,7 +92,7 @@ class NavigationCountTests(unittest.TestCase):
         counter.assert_called_once()
 
     def test_workspace_api_never_calls_business_status_login_or_network_and_respects_remote_password(self):
-        from app import create_app
+        from workspace_test_support import create_app
         app=create_app();client=app.test_client()
         pool=app.extensions['unified_logins']
         pool.remember('18200000001','UID=private; JSESSIONID=private',{},'private-token',name='private-name')
@@ -106,7 +106,7 @@ class NavigationCountTests(unittest.TestCase):
         self.assertEqual(first.json['counts'],second.json['counts'])
         self.assertNotIn('private',first.get_data(as_text=True))
         remote={'base_url':'http://192.168.31.176:5500','environ_overrides':{'REMOTE_ADDR':'192.168.31.90'}}
-        self.assertEqual(client.get('/api/navigation/issues',**remote).status_code,428)
+        self.assertEqual(client.get('/api/navigation/issues',**remote).status_code,401)
 
     def test_coupon_navigation_total_reads_saved_rules_and_excludes_occupied_or_removed_coupons(self):
         app=Flask('coupon-counts')

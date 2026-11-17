@@ -53,9 +53,23 @@
     <div id="workspace-activity-navigation"></div></nav>
     <div class="workspace-nav-divider"></div><button type="button" class="workspace-nav-item${page === 'accounts' ? ' active' : ''}" data-account-window>${icon('users')}<span>账号管理</span></button>
     <a href="/platforms" class="workspace-nav-item${page === 'platforms' ? ' active' : ''}"${page === 'platforms' ? ' aria-current="page"' : ''}>${icon('settings')}<span>平台管理</span></a>
+    <button type="button" class="workspace-nav-item" data-workspace-logout><svg class="workspace-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9"/></svg><span aria-live="polite">退出后台</span></button>
     <div class="workspace-nav-footer"><span class="workspace-service-dot"></span><div>本地服务<small id="workspace-host"></small></div><span class="workspace-private">本机</span></div>`;
   nav.querySelector('#workspace-host').textContent = location.host;
   nav.querySelector('.workspace-private').textContent = localHost?'本机':'远程';
+  const logout = nav.querySelector('[data-workspace-logout]');
+  logout.addEventListener('click', async () => {
+    if (logout.disabled) return;
+    logout.disabled = true;
+    try {
+      const response = await fetch('/api/access/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      if (!response.ok) throw new Error('退出失败');
+      location.replace('/access');
+    } catch {
+      logout.querySelector('span').textContent = '退出失败，点击重试';
+      logout.disabled = false;
+    }
+  });
   const closeNavigation=document.createElement('button');closeNavigation.type='button';closeNavigation.className='workspace-nav-close';closeNavigation.setAttribute('aria-label','收起导航');
   closeNavigation.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12 M18 6 6 18"/></svg>';
   nav.append(closeNavigation);

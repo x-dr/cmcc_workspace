@@ -63,11 +63,14 @@ class AccessBoundaryTests(unittest.TestCase):
         self.assertEqual(self.post('/api/access/login', {'password': PASSWORD}).status_code, 200)
         self.assertEqual(self.get('/recharge/api/accounts').status_code, 200)
 
-    def test_local_access_uses_peer_address_and_never_trusts_forwarded_or_host_headers(self):
+    def test_loopback_also_requires_password_and_does_not_trust_forwarded_headers(self):
         self.security.set_password(PASSWORD, '')
         for peer in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
             self.assertEqual(self.client.get('/api/logins', base_url='http://localhost:5500',
-                environ_overrides={'REMOTE_ADDR': peer}).status_code, 200)
+                environ_overrides={'REMOTE_ADDR': peer}).status_code, 401)
+        for path in ('/', '/platforms', '/recharge/', '/recharge/api/accounts'):
+            response = self.client.get(path)
+            self.assertIn(response.status_code, (303, 401), path)
         response = self.client.get('/api/logins', base_url='http://localhost:5500',
             environ_overrides=self.remote,
             headers={'X-Forwarded-For': '127.0.0.1', 'Forwarded': 'for=127.0.0.1'})
@@ -76,6 +79,81 @@ class AccessBoundaryTests(unittest.TestCase):
                            ('::ffff:192.168.31.90', self.base), ('8.8.8.8', 'http://1.2.3.4:5500')):
             self.assertEqual(self.client.get('/api/logins', base_url=base,
                 environ_overrides={'REMOTE_ADDR': peer}).status_code, 401)
+
+    def test_local_first_visit_requires_setup_and_logout_locks_both_apps(self):
+        self.assertEqual(self.client.get('/').status_code, 303)
+        self.assertEqual(self.client.get('/api/logins').status_code, 428)
+        self.assertEqual(self.client.get('/recharge/api/accounts').status_code, 428)
+        response = self.client.post('/api/access/password', json={
+            'password': PASSWORD, 'confirmation': PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        for path in ('/', '/api/logins', '/recharge/', '/recharge/api/accounts'):
+            self.assertEqual(self.client.get(path).status_code, 200, path)
+        logout = self.client.post('/api/access/logout', json={})
+        self.assertEqual(logout.status_code, 200)
+        self.assertFalse(self.client.get('/api/access/status').json['authenticated'])
+        self.assertEqual(self.client.get('/api/logins').status_code, 401)
+        self.assertEqual(self.client.get('/recharge/api/accounts').status_code, 401)
+        self.assertEqual(self.client.get('/').status_code, 303)
+        response = self.client.post('/api/access/login', json={'password': PASSWORD})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get('/api/logins').status_code, 200)
+
+    def test_backend_logout_preserves_shared_accounts_activity_sessions_and_jobs(self):
+        from http.cookiejar import CookieJar
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.client.post('/api/access/password', json={
+            'password': PASSWORD, 'confirmation': PASSWORD})
+        shared = self.app.extensions['unified_logins']
+        saved = shared.remember('19900000001', 'synthetic-app-cookie', {}, 'synthetic-app-token')
+        cache = self.app.extensions['credential_cache']
+        snapshot = {'id':saved.id, 'phone':saved.phone}
+        activity = SimpleNamespace(headers={}, cookies=SimpleNamespace(jar=CookieJar()))
+        cache.connect('synthetic-activity', snapshot, activity, lambda: {'token':'synthetic-activity-token'})
+        scheduler = self.app.extensions['lingxi_scheduler']
+        scheduler.jobs['synthetic-job'] = {'id':'synthetic-job', 'enabled':True}
+        before = shared.credentials(saved.id)
+        with patch.object(scheduler, 'shutdown') as stop:
+            response = self.client.post('/api/access/logout', json={})
+            self.assertEqual(response.status_code, 200)
+            stop.assert_not_called()
+        self.assertEqual(shared.credentials(saved.id), before)
+        self.assertEqual(cache.connect('synthetic-activity', snapshot, activity,
+            lambda: self.fail('Existing activity session must be reused')), {'token':'synthetic-activity-token'})
+        self.assertTrue(scheduler.jobs['synthetic-job']['enabled'])
+        self.assertEqual(self.client.get('/api/logins').status_code, 401)
+
+    def test_login_assets_are_public_but_business_assets_remain_protected(self):
+        for path in ('/access', '/static/access.js', '/static/access.css',
+                     '/static/mobile.js', '/static/mobile.css', '/static/theme.js', '/static/theme.css'):
+            with self.client.get(path) as response:
+                self.assertEqual(response.status_code, 200, path)
+                self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        for path in ('/static/workspace.js', '/static/app.js', '/recharge/static/workspace.js'):
+            self.assertEqual(self.client.get(path).status_code, 303, path)
+
+    def test_native_control_stays_loopback_only_before_browser_login(self):
+        self.app.add_url_rule('/_desktop/info', view_func=lambda: {'ready': True})
+        for peer in ('127.0.0.1', '::1'):
+            response = self.client.get('/_desktop/info', base_url='http://localhost:5500',
+                environ_overrides={'REMOTE_ADDR': peer})
+            self.assertEqual(response.status_code, 200)
+        for base, peer in ((self.base, '192.168.31.90'),
+                           ('http://workspace.example.com:5500', '127.0.0.1')):
+            response = self.client.get('/_desktop/info', base_url=base,
+                environ_overrides={'REMOTE_ADDR': peer})
+            self.assertEqual(response.status_code, 403)
+
+    def test_https_login_sets_secure_cookie_and_anonymous_cannot_replace_password(self):
+        self.security.set_password(PASSWORD, '')
+        response = self.client.post('/api/access/password', json={
+            'password': 'replacement-password', 'confirmation': 'replacement-password'})
+        self.assertEqual(response.status_code, 401)
+        response = self.client.post('/api/access/login', json={'password': PASSWORD},
+            base_url='https://workspace.example.com')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Secure;', response.headers['Set-Cookie'])
 
     def test_password_change_invalidates_other_cookies_and_requires_current_password(self):
         self.setup_password()
@@ -140,6 +218,24 @@ class AccessBoundaryTests(unittest.TestCase):
 
 
 class AccessPersistenceTests(unittest.TestCase):
+    def test_existing_password_and_browser_login_survive_app_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'accounts.sqlite3'
+            # Simulate the password and cookie saved by the previous version.
+            legacy = AccessSecurity(DatabaseLoginStorage(path))
+            token = legacy.set_password(PASSWORD, '')
+            original_hash = legacy.data['password_hash']
+            app = create_app(enable_recharge=True, database_path=path,
+                recharge_data_dir=Path(folder)/'recharge')
+            client = app.test_client()
+            self.assertEqual(client.get('/api/logins').status_code, 401)
+            self.assertEqual(app.extensions['access_security'].data['password_hash'], original_hash)
+            client.set_cookie('workspace_access', token)
+            for route in ('/api/logins', '/recharge/api/accounts'):
+                self.assertEqual(client.get(route).status_code, 200, route)
+            fresh_browser = app.test_client()
+            self.assertEqual(fresh_browser.post('/api/access/login', json={'password': PASSWORD}).status_code, 200)
+
     def test_tampered_and_expired_access_cookies_cannot_authorize(self):
         from unittest.mock import patch
         security = AccessSecurity()

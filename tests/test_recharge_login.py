@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from app import create_app
+from workspace_test_support import create_app
 from recharge.accounts import AccountManager
 from recharge.cmcc import ActivityClient, ActivityError, APP_UA
 from recharge.scheduler import ClaimScheduler

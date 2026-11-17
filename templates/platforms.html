@@ -21,7 +21,7 @@
       </div>
       <label class="network-port-field" for="network-port"><span><strong>服务端口</strong><small>修改并保存后，自动重启监听并打开新地址。</small></span><input id="network-port" type="number" min="1" max="65535" step="1" inputmode="numeric" disabled></label>
       <label class="network-custom-toggle"><input id="network-custom" type="checkbox" disabled><span><strong>自定义监听地址</strong><small>勾选地址后自动跟随其所属网卡的 IP 变化；关闭时监听已开启协议的全部地址。</small></span></label>
-      <p class="network-note">本机访问始终保留，保存后立即生效。已选网卡更换 IP 后自动更新监听；其他未选网卡不会自动开放。其他设备访问仍需访问密码。</p>
+      <p class="network-note">本机监听始终保留，保存后立即生效。已选网卡更换 IP 后自动更新监听；其他未选网卡不会自动开放。本机和远程访问均需密码登录。</p>
       <p id="network-address-warning" class="network-note network-address-warning" role="status" hidden></p>
       <p id="network-feedback" class="access-feedback" role="status" hidden></p>
       <div class="network-settings-actions"><button id="network-save" class="access-primary" type="submit" disabled>保存监听设置</button><button id="network-refresh" class="secondary" type="button">刷新地址</button></div>
@@ -37,7 +37,7 @@
         <label class="access-field" id="access-confirmation-field">确认新密码<input id="access-confirmation" type="password" autocomplete="new-password" maxlength="128" required></label>
       </div>
       <p id="access-feedback" class="access-feedback" role="alert" hidden></p>
-      <div class="access-settings-actions"><button class="access-primary" id="access-submit" type="submit">保存访问密码</button><button class="secondary" id="access-logout" type="button" hidden>退出远程访问</button></div>
+      <div class="access-settings-actions"><button class="access-primary" id="access-submit" type="submit">保存访问密码</button><button class="secondary" id="access-logout" type="button" hidden>退出后台登录</button></div>
     </form>
     <p class="access-settings-note">密码至少 8 位。修改后其他设备需要重新登录。错误等待依次为 5、10、30、60、120、180、300 秒，之后每次最多等待 5 分钟；刷新页面或重启服务不会清除等待。</p>
   </section>

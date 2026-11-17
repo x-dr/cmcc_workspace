@@ -129,7 +129,7 @@ class LoginCaptchaTests(unittest.TestCase):
 
 class LoginCaptchaRouteTests(unittest.TestCase):
     def setUp(self):
-        from app import create_app
+        from workspace_test_support import create_app
         self.app = create_app()
         self.app.testing = True
         self.http = self.app.test_client()

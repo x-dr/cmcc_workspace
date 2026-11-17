@@ -94,7 +94,7 @@ class SmsTests(unittest.TestCase):
         self.assertEqual(scheduler.data['accounts']['a']['query_state'],'waiting_session')
 
     def test_web_sms_routes_restore_only_campaign_and_never_expose_tokens(self):
-        from app import create_app
+        from workspace_test_support import create_app
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         app=create_app(database_path=Path(temp.name)/'accounts.sqlite3')
         shared=app.extensions['unified_logins']

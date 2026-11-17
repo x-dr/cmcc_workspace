@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 from curl_cffi.requests.exceptions import ConnectionError
 
-from app import create_app
+from workspace_test_support import create_app
 from lingxi_client import Account, LingxiError, chat, cookie_parameters, parse_sse, verify_token
 
 
@@ -186,8 +186,8 @@ class WebTests(unittest.TestCase):
     def test_origin_and_host_validation(self):
         self.assertEqual(self.client.post("/api/login/sms", json={}, headers={"Origin": "https://unrelated.example"}).status_code, 403)
         response = self.client.get("/api/status", base_url="http://unrelated.example")
-        self.assertEqual(response.status_code, 428)
-        self.assertEqual(response.json['code'], 'ACCESS_SETUP_REQUIRED')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json['code'], 'ACCESS_LOGIN_REQUIRED')
 
     def test_not_logged_in_and_message_validation(self):
         self.assertEqual(self.client.post("/api/chat", json={"message": "你好"}).status_code, 401)

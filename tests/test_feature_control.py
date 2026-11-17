@@ -191,7 +191,7 @@ class FeatureControlTests(unittest.TestCase):
 
 class AppFeatureTests(unittest.TestCase):
     def test_real_app_blocks_every_business_route_and_mounted_recharge(self):
-        from app import create_app
+        from workspace_test_support import create_app
         app = create_app(enable_recharge=True)
         features = app.extensions['feature_control']
         client = app.test_client()

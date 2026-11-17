@@ -8,28 +8,41 @@ from uuid import uuid4
 PROBE = '''
 import json
 import os
+from http.cookiejar import CookieJar
 from pathlib import Path
 import subprocess
 import urllib.error
 import urllib.request
 
 assert os.getuid() == 10001
-opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+    urllib.request.HTTPCookieProcessor(CookieJar()))
 base = 'http://127.0.0.1:5500'
 status = json.load(opener.open(base + '/api/access/status', timeout=3))
 assert status['local'] is True
 for path in ('/', '/accounts', '/star-day', '/mobile-rights', '/recharge/', '/static/app.js'):
     with opener.open(base + path, timeout=3) as response:
         assert response.status == 200, path
+        assert response.url.startswith(base + '/access?'), path
 request = urllib.request.Request(base + '/api/access/status', headers={'Host': 'workspace.example'})
 assert json.load(opener.open(request, timeout=3))['local'] is False
 request = urllib.request.Request(base + '/api/logins', headers={'Host': 'workspace.example'})
 try:
     opener.open(request, timeout=3)
 except urllib.error.HTTPError as error:
-    assert error.code == 428, error.code
+    assert error.code == (401 if status['configured'] else 428), error.code
 else:
-    raise AssertionError('Remote access must require password setup')
+    raise AssertionError('Anonymous access must require password login or setup')
+password = 'synthetic-docker-smoke-password'
+endpoint = '/api/access/login' if status['configured'] else '/api/access/password'
+payload = {'password': password, 'confirmation': password}
+request = urllib.request.Request(base + endpoint, data=json.dumps(payload).encode(),
+    headers={'Content-Type': 'application/json'})
+assert opener.open(request, timeout=3).status == 200
+for path in ('/', '/accounts', '/star-day', '/mobile-rights', '/recharge/', '/static/app.js',
+             '/api/logins', '/recharge/api/accounts'):
+    with opener.open(base + path, timeout=3) as response:
+        assert response.status == 200 and response.url == base + path, path
 for path in ('/app/.local', '/app/analysis', '/app/.git', '/app/.env', '/app/tests',
              '/app/recharge/.local', '/app/recharge/member_benefits_runtime/.cache'):
     assert not Path(path).exists(), path

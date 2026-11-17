@@ -6,7 +6,7 @@ from threading import Lock
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app import create_app
+from workspace_test_support import create_app
 from app_login import AppLoginError, AppLoginSession
 from lingxi_scheduler import SHANGHAI
 from recharge.accounts import AccountManager

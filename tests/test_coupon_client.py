@@ -286,7 +286,7 @@ class CouponClientTests(unittest.TestCase):
 
 class CouponApiTests(unittest.TestCase):
     def setUp(self):
-        from app import create_app
+        from workspace_test_support import create_app
         self.app = create_app()
         self.client = self.app.test_client()
         self.pool = self.app.extensions['unified_logins']

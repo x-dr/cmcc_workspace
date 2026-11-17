@@ -99,10 +99,10 @@ class CouponNoticeTests(unittest.TestCase):
         self.factory.assert_not_called()
 
     def test_notice_api_returns_cached_public_data_and_preserves_access_gate(self):
-        from app import create_app
+        from workspace_test_support import create_app
         app=create_app();client=app.test_client()
         app.extensions['coupon_notices'].get=Mock(return_value={'notices':[],'checked_at':None,'stale':False,'message':''})
         self.assertEqual(client.get('/api/coupons/notices').status_code,200)
         self.assertEqual(client.get('/api/coupons/notices',base_url='http://public.example:5500',
-            environ_overrides={'REMOTE_ADDR':'2001:db8::2'}).status_code,428)
+            environ_overrides={'REMOTE_ADDR':'2001:db8::2'}).status_code,401)
         app.extensions['coupon_notices'].get.assert_called_once()

@@ -77,6 +77,8 @@ class NetworkSettingsTests(TestCase):
         remote = {'base_url':'http://192.168.31.176:5500','environ_overrides':{'REMOTE_ADDR':'192.168.31.90'}}
         self.assertEqual(client.get('/api/network/status',**remote).status_code,428)
         self.assertEqual(client.post('/api/network/settings',json={'ipv4':False,'ipv6':False},**remote).status_code,428)
+        self.assertEqual(client.post('/api/access/password', json={
+            'password':'network-test-password', 'confirmation':'network-test-password'}).status_code, 200)
         self.assertEqual(client.post('/api/network/settings',json={'ipv4':False,'ipv6':True},
             headers={'Origin':'http://evil.test'}).status_code,403)
         response = client.post('/api/network/settings',json={'ipv4':False,'ipv6':True})
