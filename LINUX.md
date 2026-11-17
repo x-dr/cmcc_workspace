@@ -2,7 +2,7 @@
 
 Linux 使用 Python 本地网页服务入口 `app.py`，无需桌面环境。后台任务由同一个 Python 进程执行，关闭页面后继续运行，停止服务后暂停。
 
-也可使用 Docker／Compose 运行，镜像构建、数据迁移和 GitHub Actions 操作见 [Docker 部署说明](DOCKER.md)。
+也可使用 [docker-compose.yaml](docker-compose.yaml) 直接拉取 GitHub 构建的镜像运行，无需本地构建；部署和数据迁移见 [Docker 部署说明](DOCKER.md)。
 
 ## 安装与启动
 

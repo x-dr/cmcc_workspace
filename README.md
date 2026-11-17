@@ -4,7 +4,7 @@ Python + Flask 本地网页，默认地址 http://127.0.0.1:5500/ 。
 
 支持 Linux 源码运行：安装 Python 3.12+，执行 `python3 -m venv .venv`、`.venv/bin/python -m pip install -r requirements.txt`，再运行 `./start.sh`。无需桌面环境，账号和任务使用 Linux 本地密钥加密保存。安装、监听、数据备份和 systemd 示例见 [Linux 运行说明](LINUX.md)。
 
-支持 Docker／Compose 部署，账号、加密密钥和任务统一持久化到 `/data`。GitHub Actions 可手动构建并发布 amd64／arm64 镜像到 GHCR，默认镜像名为 `ghcr.io/x-dr/cmcc_workspace:latest`。构建、部署和迁移步骤见 [Docker 部署说明](DOCKER.md)。
+支持 Docker／Compose 部署：使用 [docker-compose.yaml](docker-compose.yaml) 直接拉取 GitHub Actions 构建的 `ghcr.io/x-dr/cmcc_workspace:latest`，无需本地构建。账号、加密密钥和任务统一持久化到 `/data`；部署、升级和迁移步骤见 [Docker 部署说明](DOCKER.md)。
 
 「平台管理 → 功能开关」可分别启用或关闭灵犀对话（含定时发送）、星动日、周三充值日、签到有礼、每月话费券、我的卡券、移动权益及独立活动／签到渠道。关闭后拦截业务接口、停止后台调度与后续抢购轮次，不再获取该功能的活动凭据；已发出的请求可完成结果保存，不重复提交。开关保存在数据库，重启保持，原配置、有效凭据和记录保留；再次开启后按既有规则继续检查和调度。共享账号和平台管理始终可访问。已到期或永久移除的活动不能通过开关恢复。
 

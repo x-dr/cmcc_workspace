@@ -1,29 +1,9 @@
+# 兼容原来的默认入口；部署配置统一维护在 docker-compose.yaml。
 services:
   lingxi:
-    image: ${LINGXI_IMAGE:-ghcr.io/x-dr/cmcc_workspace:latest}
-    build:
-      context: .
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 30s
-    environment:
-      TZ: Asia/Shanghai
-      LINGXI_DATA_DIR: /data
-      LINGXI_HOST: 0.0.0.0
-      LINGXI_PORT: "5500"
-    ports:
-      - "${LINGXI_BIND_ADDRESS:-127.0.0.1}:${LINGXI_PORT:-5500}:5500"
-    volumes:
-      - lingxi-data:/data
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    extends:
+      file: docker-compose.yaml
+      service: lingxi
 
 volumes:
   lingxi-data:
