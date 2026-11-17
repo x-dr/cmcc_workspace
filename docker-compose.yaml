@@ -11,7 +11,7 @@ services:
       LINGXI_HOST: 0.0.0.0
       LINGXI_PORT: "5500"
     ports:
-      - "${LINGXI_BIND_ADDRESS:-127.0.0.1}:${LINGXI_PORT:-5500}:5500"
+      - "${LINGXI_BIND_ADDRESS:-0.0.0.0}:${LINGXI_PORT:-5500}:5500"
     volumes:
       - lingxi-data:/data
     security_opt:
