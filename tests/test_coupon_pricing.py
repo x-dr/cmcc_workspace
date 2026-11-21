@@ -19,6 +19,11 @@ class BestCouponAmountTests(unittest.TestCase):
         choice, = _choices({'saleType': 10, 'saleCode': '20~5000:2'}, {'minAmount': 1, 'maxAmount': 5000})
         self.assertEqual((choice['value'], choice['payment'], choice['credit']), ('20', '18.00', '20.00'))
 
+    def test_percentage_coupon_uses_highest_allowed_amount_and_respects_discount_cap(self):
+        choice, = _choices({'saleType': 8, 'saleCode': '30~55:0.80', 'capDiscount': '450'},
+                           {'minAmount': 1, 'maxAmount': 50})
+        self.assertEqual((choice['value'], choice['payment'], choice['credit']), ('50', '45.50', '50.00'))
+
     def test_custom_threshold_respects_official_amount_limits(self):
         choice, = _choices({'saleType': 10, 'saleCode': '25~100:3'}, {'minAmount': 28, 'maxAmount': 80})
         self.assertEqual((choice['value'], choice['payment']), ('28', '25.00'))

@@ -951,6 +951,34 @@ class CouponUseTests(unittest.TestCase):
         self.assertNotIn('newAmount', body)
         self.assertEqual(next(iter(self.storage.data.values()))['charge_amount'], '18.00')
 
+    def test_wednesday_discount_previews_and_submits_the_official_payable_amount(self):
+        self.env.recharge()
+        self.env.row.update(pCardType='002', stallName='8折话费折扣券', couponValue='8', valueFormat='8', unitFormat='折')
+        self.env.rule.update(saleType=8, saleCode='1~55:0.80', capDiscount=None, discountFormat='3')
+        self.env.amount_rule = {'minAmount': 1, 'maxAmount': 5000}
+
+        preview = self.prepare()
+        self.assertEqual(preview['coupon_unit'], '折')
+        self.assertEqual(preview['choices'], [{'value': '55', 'label': '充值 55 元 · 实付 44 元，到账 55 元'}])
+        self.assertEqual(self.env.final_calls, [])
+
+        result = self.confirm(preview['operation_id'], charge_amount='55')
+        self.assertEqual(result['state'], 'payment_required')
+        body = json.loads(base64.b64decode(self.env.final_calls[0][1]['param']))
+        self.assertEqual((body['amount'], body['chargeMoney'], body['choseMoney']), (44, '55.00', '55'))
+        self.assertNotIn('newAmount', body)
+        self.assertEqual(next(iter(self.storage.data.values()))['charge_amount'], '44.00')
+
+    def test_discount_cap_changed_after_preview_requires_new_confirmation(self):
+        self.env.recharge()
+        self.env.rule.update(saleType=8, saleCode='10~55:0.80', capDiscount=150)
+        preview = self.prepare()
+        self.env.rule['capDiscount'] = 100
+        with self.assertRaises(CouponUseError) as error:
+            self.confirm(preview['operation_id'], charge_amount=preview['choices'][0]['value'])
+        self.assertEqual(error.exception.code, 'RULE_CHANGED')
+        self.assertEqual(self.env.final_calls, [])
+
     def test_special_reduction_preserves_official_amount_and_separate_net_fields(self):
         self.env.recharge()
         self.env.row.update(pCardType='005', stallName='2元话费立减券')

@@ -10,12 +10,13 @@ from login_storage import LoginStorageError
 BUILTINS = (
     ('lingxi', '灵犀对话', '/lingxi', ('/lingxi', '/api/lingxi', '/api/chat', '/api/conversation', '/api/login/select')),
     ('star-day', '星动日', '/star-day', ('/star-day', '/api/star-day')),
+    ('net-age', '网龄', '/net-age', ('/net-age', '/api/net-age')),
     ('recharge', '周三充值日', '/recharge/', ('/recharge',)),
     ('checkin', '签到有礼', '/checkin', ('/checkin', '/api/checkin')),
     ('monthly-coupon', '每月话费券', '/monthly-coupon', ('/monthly-coupon', '/api/monthly-coupon')),
     ('coupons', '我的卡券', '/coupons', ('/coupons', '/api/coupons', '/coupon-verification')),
-    ('mobile-rights', '移动权益', '/mobile-rights', ('/mobile-rights', '/api/mobile-rights')),
-    ('member-benefits', '会员权益', '/member-benefits', ('/member-benefits', '/api/member-benefits')),
+    ('mobile-rights', '权益领取', '/mobile-rights', ('/mobile-rights', '/api/mobile-rights')),
+    ('member-benefits', '会员领取', '/member-benefits', ('/member-benefits', '/api/member-benefits')),
     ('bills', '信息查询', '/information', ('/information', '/bills', '/api/bills', '/api/usage', '/api/services')),
 )
 

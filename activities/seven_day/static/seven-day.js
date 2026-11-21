@@ -78,6 +78,7 @@
       const signin = node('td');
       if (progress.checked_today) signin.append(badge('今日已打卡', 'success'));
       else if (progress.completed || progress.claimed) signin.append(badge('本轮已完成', 'success'));
+      else if (model.campaign.sold_out) signin.append(badge('打卡收官', 'attention'));
       else if (progress.eligible === false) signin.append(badge('资格未通过', 'attention'));
       else signin.append(badge(progress.checked_today === false ? '今日待打卡' : '待查询', progress.checked_today === false ? 'pending' : ''));
       const sequence = node('td'), days = node('div', 'seven-days');
@@ -88,7 +89,7 @@
       for (let day = 0; day < 7; day++) meter.append(node('i', day < progress.days ? 'done' : ''));
       sequence.append(meter, node('small', '', `累计 ${progress.total_amount === null || progress.total_amount === undefined ? '—' : progress.total_amount} 元`));
       const reward = node('td');
-      reward.append(badge(progress.claimed ? '已领取' : progress.completed ? '待短信领取' : progress.eligible === false ? '暂不可参与' : '待满 7 天', progress.claimed ? 'success' : progress.completed || progress.eligible === false ? 'attention' : ''));
+      reward.append(badge(progress.claimed ? '已领取' : model.campaign.sold_out ? '红包已抢完' : progress.completed ? '待短信领取' : progress.eligible === false ? '暂不可参与' : '待满 7 天', progress.claimed ? 'success' : progress.completed || model.campaign.sold_out || progress.eligible === false ? 'attention' : ''));
       if (progress.claimed) reward.append(node('small', '', '前往“我的卡券”使用'));
       const draw = node('td');
       draw.append(badge(progress.chances === 0 ? '今日机会已用完' : progress.eligible === false ? '暂不可参与' : progress.chances > 0 ? `剩余 ${progress.chances} 次` : '待查询', progress.chances === 0 ? 'success' : progress.eligible === false ? 'attention' : progress.chances > 0 ? 'pending' : ''));
@@ -100,8 +101,8 @@
       if (account.retry_message) recent.append(node('small', 'seven-login-warning', account.retry_message));
       if (account.next_run) recent.append(node('small', '', '下次 '+date(account.next_run)));
       const operations = node('td'), buttons = node('div', 'seven-row-actions');
-      buttons.append(action('打卡', account, 'signin', progress.checked_today || progress.completed || progress.claimed));
-      if (progress.completed && !progress.claimed) buttons.append(action('领红包', account, 'claim', false, true));
+      buttons.append(action('打卡', account, 'signin', model.campaign.sold_out || progress.checked_today || progress.completed || progress.claimed));
+      if (!model.campaign.sold_out && progress.completed && !progress.claimed) buttons.append(action('领红包', account, 'claim', false, true));
       buttons.append(action('夺宝', account, 'draw', progress.chances === 0), action('查询', account, 'refresh'));
       if (account.status !== 'active' || account.activity_login_required) {
         const login = node('button', 'quiet', '重新登录');
@@ -121,16 +122,15 @@
   function updateCampaign() {
     clearTimeout(expiryTimer);
     const campaign = model.campaign;
-    const soldOut = campaign.end_reason === 'sold_out';
     if (campaign.ended) window.dispatchEvent(new CustomEvent('platforms-changed'));
     $('seven-period').textContent = campaign.end_at ? `计划至 ${date(campaign.end_at)}` : '活动时间暂未读取';
-    $('seven-ended-title').textContent = soldOut ? '红包已领完，活动提前结束' : '活动已结束';
-    $('seven-ended-description').textContent = soldOut ? '官方红包库存已耗尽，按活动规则，打卡和夺宝同步停止。已领取的奖品可在“我的卡券”查看。' : '自动任务已停止，活动入口将从导航移除。已领取的奖品可在“我的卡券”查看。';
-    $('seven-warning').textContent = [campaign.notice, model.warning].filter(Boolean).join('\n');
+    $('seven-ended-title').textContent = '活动已结束';
+    $('seven-ended-description').textContent = '自动任务已停止，已领取的奖品可在“我的卡券”查看。';
+    $('seven-warning').textContent = [campaign.sold_out && !campaign.ended ? '打卡红包已抢完。天天来夺宝按官方当天次数参与。' : '', campaign.notice, model.warning].filter(Boolean).join('\n');
     $('seven-warning').hidden = !$('seven-warning').textContent;
     $('seven-rules-text').textContent = campaign.rules_text || '';
     $('seven-official-rules').hidden = !campaign.rules_text;
-    $('seven-expiry-note').textContent = campaign.end_at ? `计划截止时间：${date(campaign.end_at)}。入口和后台任务跟随官方页面配置；如红包库存耗尽，整个活动会提前结束。` : '入口与自动任务跟随官方页面的实际下线时间。';
+    $('seven-expiry-note').textContent = campaign.end_at ? `计划至 ${date(campaign.end_at)}。打卡红包库存与夺宝次数以官方记录为准。` : '入口与自动任务跟随官方页面的实际下线时间。';
     const remaining = Date.parse(campaign.end_at)-Date.parse(campaign.server_time);
     if (campaign.active && remaining > 0) {
       const deadline = Date.now()+remaining;

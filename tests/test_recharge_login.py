@@ -14,9 +14,9 @@ class AppActivityLoginTests(unittest.TestCase):
         page = Mock(status_code=200, url='https://wx.10086.cn/qwhdsso/login',
                     text="var loginPath = '/appTokenLogin?sid=fresh-session';")
         finish = Mock(status_code=200)
-        identity = Mock(status_code=200)
-        identity.json.return_value = {'code': '0', 'data': {'phone': '19900000000', 'provinceCode': '100'}}
-        self.http.get.side_effect = [page, finish, identity]
+        self.identity = Mock(status_code=200)
+        self.identity.json.return_value = {'code': '0', 'data': {'phone': '19900000000', 'provinceCode': '100'}}
+        self.http.get.side_effect = [page, finish, self.identity]
         self.http.post.return_value.status_code = 200
         self.http.post.return_value.json.return_value = {'code': 'SUCCESS', 'data': {'url': '/qwhdsso/redirect?sid=fresh-session'}}
 
@@ -54,6 +54,26 @@ class AppActivityLoginTests(unittest.TestCase):
         self.assertTrue(failure.exception.retryable)
         self.assertNotIn('private upstream detail', str(failure.exception))
         self.assertEqual(self.client.mode, 'none')
+
+    def test_invalid_app_token_login_reply_names_the_login_stage(self):
+        self.http.post.return_value.json.side_effect = ValueError('private upstream body')
+        with patch('recharge.cmcc.requests.Session', return_value=self.http):
+            with self.assertRaises(ActivityError) as failure:
+                self.client.connect_app('JSESSIONID=private', '19900000000')
+        self.assertEqual(failure.exception.code, 'APP_SSO_FORMAT')
+        self.assertIn('活动登录', str(failure.exception))
+        self.assertNotIn('private upstream body', str(failure.exception))
+        self.assertEqual(self.http.get.call_count, 1)
+
+    def test_invalid_identity_reply_names_the_identity_stage(self):
+        self.identity.json.side_effect = ValueError('private upstream body')
+        with patch('recharge.cmcc.requests.Session', return_value=self.http):
+            with self.assertRaises(ActivityError) as failure:
+                self.client.connect_app('JSESSIONID=private', '19900000000')
+        self.assertEqual(failure.exception.code, 'APP_SSO_FORMAT')
+        self.assertIn('活动身份核对', str(failure.exception))
+        self.assertNotIn('private upstream body', str(failure.exception))
+        self.http.post.assert_called_once()
 
 
 class MountedRechargeTests(unittest.TestCase):

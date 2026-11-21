@@ -12,6 +12,7 @@ from unittest.mock import Mock,patch
 from cryptography.fernet import Fernet
 
 from workspace_test_support import create_app
+from lingxi_client import LingxiError
 from lingxi_scheduler import LingxiScheduler,TaskError,SHANGHAI,validate_plan
 from login_storage import DatabaseLoginStorage,LoginStorageError
 
@@ -355,6 +356,30 @@ class ScheduledWebTests(unittest.TestCase):
             while self.scheduler.workers and time.monotonic()<deadline:time.sleep(.01)
         self.assertFalse(self.scheduler.workers)
         self.assertEqual(seen[0][0],'new-token');self.assertEqual(seen[0][2],'custom message')
+
+    @patch('app.verify_token')
+    @patch('app.exchange_cookie',return_value='recovered-token')
+    def test_later_planned_sends_recover_after_first_authentication_failure(self,exchange,verify):
+        used=[]
+        def fake_chat(account,message,*,before_send):
+            before_send();used.append(account.auth_code)
+            if len(used)==1:
+                raise LingxiError('expired',authentication=True)
+            yield {'type':'delta','text':'reply'}
+            yield {'type':'done'}
+        payload={**self.payload(),'repeat_count':3,'interval':.2}
+        task_id=self.http.post('/api/lingxi/tasks/save',json=payload).json['ids'][0]
+        with patch('app.chat',side_effect=fake_chat):
+            self.scheduler.tick()
+            deadline=time.monotonic()+3
+            while self.scheduler.workers and time.monotonic()<deadline:time.sleep(.01)
+        self.assertFalse(self.scheduler.workers)
+        task=self.scheduler.snapshots(task_id)[0]
+        self.assertEqual(used,['old-token','recovered-token','recovered-token'])
+        self.assertEqual([attempt['status'] for attempt in task['attempts']],['failed','success','success'])
+        self.assertFalse(any('尚未就绪' in attempt['error'] for attempt in task['attempts']))
+        exchange.assert_called_once_with('JSESSIONID=unit')
+        self.assertEqual(self.saved.token,'recovered-token')
 
 
 if __name__=='__main__':unittest.main()

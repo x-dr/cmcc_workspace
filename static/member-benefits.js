@@ -244,14 +244,17 @@
 
   function renderClaimSelection(member, benefit, row, statusNode, flow) {
     if (benefit.claim_pending) { feedback(row)(benefit.status_message); return; }
+    const orderNotice = benefit.local_order_notice;
+    if (orderNotice && benefit.remaining !== 0) feedback(row)(orderNotice);
     if (benefit.claimed || !benefit.remaining) return;
     const discount = flow === 'discount';
-    const offers = (discount && !benefit.selection?.can_check ? [] : benefit.selection?.offers) || [];
+    const offers = (discount && !orderNotice && !benefit.selection?.can_check ? [] : benefit.selection?.offers) || [];
     if (!offers.length) {
-      feedback(row)(benefit.selection_error || (discount ? '官方暂无可订购的五折购商品。' : '官方暂无可领取的福袋商品。'));
+      if (!orderNotice) feedback(row)(benefit.selection_error || (discount ? '官方暂无可订购的五折购商品。' : '官方暂无可领取的福袋商品。'));
       return;
     }
-    const prompt = discount ? `选择五折购商品（${offers.length} 项）` : '选择福袋商品';
+    const verb = orderNotice ? '查看' : '选择';
+    const prompt = discount ? `${verb}五折购商品（${offers.length} 项）` : `${verb}福袋商品`;
     const select = element('select', '', 'member-offer-select');
     select.setAttribute('aria-label', `${member.name} ${prompt}`);
     const placeholder = element('option', prompt);
@@ -262,11 +265,13 @@
         ? [offer.name, offerPrice(offer)].filter(Boolean).join(' · ')
         : offer.name + (offer.can_claim ? '' : ' · 暂不可领取'));
       option.value = offer.id;
-      option.disabled = discount ? !offer.id : !offer.can_claim;
+      option.disabled = !orderNotice && (discount ? !offer.id : !offer.can_claim);
       select.append(option);
     }
+    row.append(select);
+    if (orderNotice) return;
     const action = element('div', '', 'member-campus-action');
-    row.append(select, action);
+    row.append(action);
     const accountVersion = requestId;
     const loginId = current;
     const active = () => accountVersion === requestId;
@@ -437,9 +442,6 @@
     row.append(heading);
     if (benefit.kind === '礼包') {
       if (benefit.can_claim) bindSmsClaim(member, benefit, row, statusNode);
-      else if (benefit.status_message) feedback(row)(benefit.status_message);
-    } else if (benefit.local_order_notice) {
-      if (benefit.remaining !== 0 && !benefit.claim_pending) feedback(row)(benefit.local_order_notice);
       else if (benefit.status_message) feedback(row)(benefit.status_message);
     } else if (discount || benefit.claim_flow === 'campus') {
       renderClaimSelection(member, benefit, row, statusNode, discount ? 'discount' : 'campus');

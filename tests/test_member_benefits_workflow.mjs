@@ -88,6 +88,23 @@ async function fixture({flow='discount', benefitState={}, firstSmsError, claimEr
   return {get,calls,events};
 }
 
+test('a backend order notice keeps offers visible without exposing an inactive submit control', async () => {
+  const notice = '安卓版暂未接入该权益的订单验证，请在电脑版工具台处理。';
+  for (const flow of ['campus', 'discount']) {
+    const {get, calls} = await fixture({flow, benefitState: {local_order_notice: notice}});
+    const panel = get('member-vips');
+    const select = panel.querySelector('select');
+    assert.ok(select);
+    assert.match(select.children[0].textContent, /^查看/);
+    assert.equal(select.children[1].textContent,
+      flow === 'discount' ? '咪咕视频钻石会员月卡 · 标示价 ¥15.00' : '咪咕视频钻石会员月卡');
+    assert.ok(descendants(panel).some(node => node.textContent === notice));
+    assert.equal(select.onchange, undefined);
+    assert.equal(panel.querySelector('form'), undefined);
+    assert.ok(calls.every(call => !call.body));
+  }
+});
+
 test('suixin requires a selected offer and explicit SMS and claim confirmations',async()=>{
   const {get,calls}=await fixture({flow:'suixin',products:[{
     key:'s1',name:'全网随心系',claim_status:'available',can_claim:true,options:[

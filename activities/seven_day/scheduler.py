@@ -68,15 +68,17 @@ class SevenDayScheduler:
         now = self.now()
         end = datetime.fromisoformat(value['end_at'])
         start = datetime.fromisoformat(value['start_at'])
-        end_reason = 'time_expired' if now >= end else 'sold_out' if value.get('sold_out') else None
+        end_reason = 'time_expired' if now >= end else None
         ended = end_reason is not None
         return {**value, 'active': start <= now < end and not ended, 'ended': ended,
                 'end_reason': end_reason, 'server_time': now.isoformat()}
 
-    def _available(self):
+    def _available(self, *, reward=False):
         campaign = self.metadata()
         if not campaign['active']:
             raise SevenDayError('活动已结束' if campaign['ended'] else '活动尚未开始', 'ACTIVITY_CLOSED', 409)
+        if reward and campaign.get('sold_out'):
+            raise SevenDayError('打卡红包已抢完，天天来夺宝按官方次数参与', 'REWARD_SOLD_OUT', 409)
 
     def update_settings(self, payload):
         settings = {key: payload.get(key, self.data['settings'][key]) for key in DEFAULT_SETTINGS}
@@ -189,7 +191,7 @@ class SevenDayScheduler:
         observation = self.data['observations'].get(login_id, {})
         settings = self.data['settings']
         return (observation.get('date') == now.date().isoformat()
-                and (not settings['signin_enabled'] or observation.get('checked_today')
+                and (not settings['signin_enabled'] or self.data['campaign'].get('sold_out') or observation.get('checked_today')
                      or observation.get('completed') or observation.get('claimed'))
                 and (not settings['draw_enabled'] or observation.get('chances') == 0))
 
@@ -259,7 +261,7 @@ class SevenDayScheduler:
                     due = max(due, retry_due)
                 candidates = []
                 today = observation.get('date') == now.date().isoformat()
-                if settings['signin_enabled'] and not observation.get('completed') and not observation.get('claimed'):
+                if settings['signin_enabled'] and not campaign.get('sold_out') and not observation.get('completed') and not observation.get('claimed'):
                     hour, minute = map(int, settings['signin_time'].split(':'))
                     at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                     candidates.append(at+timedelta(days=1) if today and observation.get('checked_today') else max(now, at))
@@ -289,7 +291,7 @@ class SevenDayScheduler:
     def run(self, login_id, kind='refresh', *, target=None):
         if kind not in ('signin', 'draw', 'refresh', 'automatic', 'prewarm', 'restored'):
             raise SevenDayError('请选择打卡、夺宝或刷新', 'INVALID_KIND', 400)
-        self._available()
+        self._available(reward=kind == 'signin')
         self._account(login_id)
         with self.lock:
             self._expire_pending()
@@ -332,12 +334,11 @@ class SevenDayScheduler:
             client.connect()
             observation = client.inspect(self.now())
             self._observe(login_id, observation)
-            if client.stock() == 0:
+            if not self.data['campaign'].get('sold_out') and client.stock() == 0:
                 with self.lock:
                     updated = deepcopy(self.data)
                     updated['campaign']['sold_out'] = True
                     self._commit(updated)
-                return
             if target:
                 deadline = time.monotonic() + max(0, (target-self.now()).total_seconds())
                 while time.monotonic() < deadline and not self.quit.is_set() and feature_running():
@@ -348,7 +349,8 @@ class SevenDayScheduler:
                 self._observe(login_id, observation)
             settings = dict(self.data['settings'])
             clock = self.now().strftime('%H:%M')
-            do_signin = kind == 'signin' or kind in ('automatic','restored') and settings['signin_enabled'] and clock >= settings['signin_time']
+            do_signin = not self.data['campaign'].get('sold_out') and (
+                kind == 'signin' or kind in ('automatic','restored') and settings['signin_enabled'] and clock >= settings['signin_time'])
             do_draw = kind in ('draw', 'prewarm') or kind in ('automatic','restored') and settings['draw_enabled']
             if do_signin and not observation['checked_today'] and not observation['completed'] and not observation['claimed']:
                 try:
@@ -400,7 +402,7 @@ class SevenDayScheduler:
                       or do_draw and observation['chances'] > 0)
             if kind == 'refresh':
                 self._record(login_id, 'refresh', message='已更新官方打卡和夺宝进度')
-            if observation['completed'] and not observation['claimed']:
+            if not self.data['campaign'].get('sold_out') and observation['completed'] and not observation['claimed']:
                 self._record(login_id, 'claim', message='连续7天已完成，请填写短信验证码领取5元红包')
         except SevenDayError as error:
             failed, failure_code = True, error.code
@@ -424,7 +426,7 @@ class SevenDayScheduler:
                 self.due[login_id] = self.now()+timedelta(minutes=self.data['settings']['retry_interval_minutes'])
 
     def send_sms(self, login_id):
-        self._available()
+        self._available(reward=True)
         self._account(login_id)
         with self.lock:
             self._expire_pending()
@@ -454,7 +456,7 @@ class SevenDayScheduler:
     def claim(self, login_id, code):
         if not isinstance(code, str) or not re.fullmatch(r'\d{6}', code):
             raise SevenDayError('请输入6位短信验证码', 'INVALID_CODE', 400)
-        self._available()
+        self._available(reward=True)
         with self.lock:
             self._expire_pending()
             if login_id in self.running:
@@ -535,7 +537,9 @@ class SevenDayScheduler:
             self.revisions[login_id] = revision
             observation = self.data['observations'].get(login_id, {})
             today = observation.get('date') == now.date().isoformat()
-            signin_due = settings['signin_enabled'] and now.strftime('%H:%M') >= settings['signin_time'] and not observation.get('claimed') and not observation.get('completed') and not (today and observation.get('checked_today'))
+            signin_due = (settings['signin_enabled'] and not self.data['campaign'].get('sold_out')
+                          and now.strftime('%H:%M') >= settings['signin_time'] and not observation.get('claimed')
+                          and not observation.get('completed') and not (today and observation.get('checked_today')))
             draw_due = settings['draw_enabled'] and not (today and observation.get('chances') == 0)
             if signin_due or draw_due:
                 self.run(login_id, 'automatic')

@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from io import BytesIO
+import json
 from pathlib import Path
 import tempfile
 from threading import Event
@@ -11,7 +12,7 @@ from urllib.error import HTTPError, URLError
 
 from workspace_test_support import create_app
 from login_storage import DatabaseLoginStorage
-from update_checker import CHECK_INTERVAL, REPOSITORY, UpdateChecker, fetch_release, version_numbers
+from update_checker import ANDROID_API_URL, CHECK_INTERVAL, REPOSITORY, UpdateChecker, fetch_release, version_numbers
 
 
 def release(version='1.4.0'):
@@ -168,6 +169,24 @@ class UpdateCheckerTests(unittest.TestCase):
         self.assertIsNone(request.get_header('Authorization'))
         self.assertIsNone(request.get_header('Cookie'))
         self.assertEqual(opener.call_args.kwargs['timeout'], 10)
+
+    def test_android_finds_a_newer_apk_release_without_the_latest_marker(self):
+        android = release('1.9.3')
+        android['assets'] = [android['assets'][-1]]
+        windows_only = release('1.10.0')
+        windows_only['assets'].pop()
+        unpublished = {**release('1.11.0'), 'draft': True}
+        preview = {**release('1.10.1'), 'prerelease': True}
+        response = BytesIO(json.dumps([windows_only, release('1.9.2'), preview, android, unpublished]).encode())
+        response.headers = {'ETag':'android-release-list'}
+        with patch('update_checker.urlopen', return_value=response) as opener:
+            checker = UpdateChecker(current_version='1.9.2', platform='android')
+            checker.request_check()
+            status = wait(checker)
+        self.assertEqual(opener.call_args.args[0].full_url, ANDROID_API_URL)
+        self.assertTrue(status['available'])
+        self.assertEqual(status['release']['tag'], 'v1.9.3')
+        self.assertEqual(status['recommended']['name'], 'LingxiWorkspace-1.9.3-Android-arm64.apk')
 
     def test_background_start_uses_the_same_cache_and_stops(self):
         checker = self.checker()

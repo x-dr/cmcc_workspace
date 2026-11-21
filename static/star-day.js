@@ -2,15 +2,31 @@
   'use strict';
   const $=id=>document.getElementById(id), node=(tag,cls='',text='')=>{const e=document.createElement(tag);e.className=cls;e.textContent=text;return e;};
   let model={accounts:[],jobs:[],products:[],settings:{signin_enabled:true,signin_time:'00:01'}},loading=false,working=false,product=null,claimNow=false,giftOptions=null,giftLoading=false,smsAccount=null,smsReadyAt=0;
+  let claimCatalogRequest=null,claimProducts=[];
   const labels={signed:'今日已签到',pending:'待签到',unknown:'待查询',ineligible:'不符合资格',ready:'已更新',running:'执行中',preparing:'准备中',waiting:'待执行',monthly_completed:'本月已完成',auth_failed:'活动认证待恢复',rate_limited:'请求受限',completed:'已完成',finished:'已结束',success:'领取成功',already_claimed:'本月已领取',failed:'未完成',skipped:'已跳过',stopped:'已停止',missed:'已错过',interrupted:'已中断',login_required:'需重新登录'};
   const time=value=>value?new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—';
   const badge=(state,text)=>node('span','star-badge '+({signed:'green',monthly_completed:'green',auth_failed:'orange',rate_limited:'orange',completed:'green',success:'green',already_claimed:'green',pending:'blue',waiting:'blue',running:'blue',preparing:'blue',failed:'red',login_required:'orange',ineligible:'orange',unknown:'orange'}[state]||''),text||labels[state]||state);
-  async function api(path,body){const response=await fetch('/api/star-day/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||data.message||'读取失败');return data;}
+  async function api(path,body,signal){
+    const options=body===undefined?{signal}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)};
+    const response=await fetch('/api/star-day/'+path,options),data=await response.json();
+    if(!response.ok)throw new Error(data.error||data.message||'读取失败');
+    return data;
+  }
   function feedback(message,error=false){$('star-feedback').textContent=message;$('star-feedback').classList.toggle('error',error);$('star-feedback').hidden=!message;}
   function button(text,action,cls='quiet'){const b=node('button',cls,text);b.type='button';b.disabled=working;b.addEventListener('click',action);return b;}
   function empty(target,count,text){const row=node('tr'),cell=node('td','star-empty',text);cell.colSpan=count;row.append(cell);$(target).replaceChildren(row);}
   function showRecords(title,items){$('star-records-title').textContent=title;const rows=items.map(item=>{const row=node('article','star-record');row.append(node('time','',time(item.time)),node('p','',(item.account_name?item.account_name+' · ':'')+(item.message||'暂无结果')));if(item.attempts?.length){const details=node('details'),list=node('ol');details.append(node('summary','',`查看 ${item.attempts.length} 次请求记录`));for(const attempt of item.attempts)list.append(node('li','',`第 ${attempt.index} 轮（${attempt.planned_offset_ms??0} 毫秒） · ${time(attempt.sent_at)} · ${attempt.message}`));details.append(list);row.append(details);}return row;});$('star-records-content').replaceChildren(...(rows.length?rows:[node('p','star-note','暂无执行记录。')]));$('star-records').showModal();}
-  function updateAccountSelection(){const boxes=[...document.querySelectorAll('#star-account-options input:not(:disabled)')],count=boxes.filter(b=>b.checked).length;$('star-select-all').checked=boxes.length>0&&count===boxes.length;$('star-select-all').indeterminate=count>0&&count<boxes.length;$('star-select-all').disabled=!boxes.length;$('star-selected-count').textContent=`已选 ${count} / ${boxes.length} 个`;}
+  function updateAccountSelection(){
+    const boxes=[...document.querySelectorAll('#star-account-options input:not(:disabled)')],count=boxes.filter(b=>b.checked).length;
+    $('star-select-all').checked=boxes.length>0&&count===boxes.length;
+    $('star-select-all').indeterminate=count>0&&count<boxes.length;
+    $('star-select-all').disabled=!boxes.length;
+    $('star-selected-count').textContent=`已选 ${count} / ${boxes.length} 个`;
+    const ready=count>0&&(!claimNow||Boolean($('star-claim-product').value));
+    const submit=$('star-reservation-submit');
+    submit.disabled=working||!ready;
+    submit.textContent=working&&ready?'正在提交…':claimNow?'确认立即领取':'启用自动领取';
+  }
   function renderAccountSelection(loginId=null){const rows=model.accounts.map(a=>{const label=node('label','star-account-option'),box=node('input'),text=node('span');box.type='checkbox';box.value=a.id;box.disabled=a.status!=='active'||a.state==='login_required'||claimNow&&a.month_claimed===true;box.checked=!box.disabled&&(!loginId||a.id===loginId);box.addEventListener('change',updateAccountSelection);text.append(node('strong','',a.name||a.phone_masked),node('small','',a.phone_masked));if(box.disabled)text.append(node('small','',a.status!=='active'||a.state==='login_required'?'需要重新登录':'本月已领取'));label.append(box,text);return label;});$('star-account-options').replaceChildren(...rows);updateAccountSelection();}
   function render(){
     const clock=model.calibration;$('star-clock-status').textContent=clock?.state==='ready'?`所有账号共用 · 服务器偏差 ${clock.offset_ms>0?'+':''}${clock.offset_ms.toFixed(1)} 毫秒 · 估计误差 ±${clock.uncertainty_ms} 毫秒 · ${time(clock.at)}`:clock?.state==='running'?'正在统一校准，所有账号共用同一结果…':clock?.state==='failed'?'校准未完成：'+clock.message:'尚未校准 · 预约执行前自动统一校准，所有账号共用';$('star-calibrate').disabled=working||clock?.state==='running';
@@ -25,26 +41,67 @@
     $('star-run').disabled=working||!model.accounts.some(a=>a.status==='active');updateSms();
   }
   async function refresh(openPage=false){if(loading)return;loading=true;try{if(openPage)await api('open',{});model=await api('status');render();$('star-warning').textContent=model.warning;$('star-warning').hidden=!model.warning;$('star-sync').textContent='北京时间 · 最近同步 '+time(model.server_time);}catch(error){feedback(error.message,true);}finally{loading=false;}}
-  async function mutate(action){if(working)return;working=true;try{await action();await refresh();}catch(error){const open=document.querySelector('dialog[open] .star-dialog-error');if(open){open.textContent=error.message;open.hidden=false;}else feedback(error.message,true);}finally{working=false;render();document.querySelectorAll('dialog button[type=submit]').forEach(b=>b.disabled=false);if($('star-gift').open)updateGiftSummary();}}
+  async function mutate(action,refreshStatus=true){
+    if(working)return;
+    working=true;
+    try{await action();if(refreshStatus)await refresh();}
+    catch(error){
+      const open=document.querySelector('dialog[open] .star-dialog-error');
+      if(open){
+        open.textContent=error.message;
+        open.hidden=false;
+        if($('star-reservation').open)open.scrollIntoView({block:'center'});
+      }else feedback(error.message,true);
+    }
+    finally{
+      working=false;render();
+      document.querySelectorAll('dialog button[type=submit]').forEach(b=>b.disabled=false);
+      if($('star-reservation').open)updateAccountSelection();
+      if($('star-gift').open)updateGiftSummary();
+    }
+  }
   function runSign(ids){mutate(async()=>{const v=await api('signin',ids?{login_ids:ids}:{});feedback(v.message);});}
   function stopJob(id){mutate(async()=>{await api('jobs/stop',{id});feedback('任务已停止并从列表移除。');});}
   function resetErrors(){document.querySelectorAll('.star-dialog-error').forEach(e=>e.hidden=true);}
   const offsetValues=()=>[...document.querySelectorAll('#star-offsets input')].map(e=>Number(e.value));
   function updateRoundPlan(){const values=offsetValues();$('star-round-plan').textContent='相对基准时间：'+values.map(v=>v+' 毫秒').join('、')+'。负数提前，正数延后；所有轮次共用一次校准。';$('star-add-round').disabled=values.length>=20;}
   function renderOffsets(values){$('star-offsets').replaceChildren(...values.map((v,index)=>{const wrap=node('div','star-offset'),label=node('label','',`第 ${index+1} 轮`),input=node('input'),remove=button('×',()=>{const next=offsetValues();next.splice(index,1);renderOffsets(next);});input.type='number';input.min='-2000';input.max='2000';input.required=true;input.value=v;input.setAttribute('aria-label',`第 ${index+1} 轮偏移（毫秒）`);input.addEventListener('input',updateRoundPlan);remove.setAttribute('aria-label',`删除第 ${index+1} 轮`);remove.disabled=values.length===1;label.append(input);wrap.append(label,remove);return wrap;}));updateRoundPlan();}
-  function openReservation(p){claimNow=false;product=p;resetErrors();$('star-reservation-title').textContent='配置每月权益领取';$('star-reservation-note').textContent='每天北京时间 10:00 对未成功账号开抢，直到当月成功；下个月自动继续。所有账号共用一次校准。';$('star-product-choice').hidden=true;$('star-reservation-timing').hidden=false;$('star-reservation-timing').disabled=false;$('star-reservation-submit').textContent='启用自动领取';$('star-product-name').textContent=p.name;$('star-reservation-form').reset();renderAccountSelection();renderOffsets([-50,0,50,100,150]);$('star-reservation').showModal();}
+  function openReservation(p){claimNow=false;product=p;resetErrors();$('star-reservation-title').textContent='配置每月权益领取';$('star-reservation-note').textContent='每天北京时间 10:00 对未成功账号开抢，直到当月成功；下个月自动继续。所有账号共用一次校准。';$('star-product-choice').hidden=true;$('star-reservation-timing').hidden=false;$('star-reservation-timing').disabled=false;$('star-product-name').textContent=p.name;$('star-reservation-form').reset();renderAccountSelection();renderOffsets([-50,0,50,100,150]);$('star-reservation').showModal();}
   function openClaim(p=null,loginId=null){mutate(async()=>{
-    if(!model.products.length)model.products=(await api('products')).products;
-    if(!model.products.length){feedback('官方当前暂无可选权益。',true);return;}
     claimNow=true;product=p;resetErrors();$('star-reservation-form').reset();
-    $('star-reservation-title').textContent='立即领取权益';$('star-product-name').textContent='现在发起，无需等待预约时间';
+    $('star-reservation-title').textContent='立即领取权益';
     $('star-reservation-note').textContent='先核对官方本月领取记录；已领取的账号不重复提交，未领取的账号各尝试一次。不会修改原有抢购预约。';
     $('star-product-choice').hidden=false;$('star-reservation-timing').hidden=true;$('star-reservation-timing').disabled=true;
-    $('star-reservation-submit').textContent='确认立即领取';
-    const options=model.products.map(item=>{const option=node('option','',`${item.name} · 第 ${item.phase} 组 · ${item.stock==null?'库存以官方为准':item.stock>=100?'已领完':`已领 ${item.stock}%`}`);option.value=item.phase+':'+item.id;return option;});
-    $('star-claim-product').replaceChildren(...options);$('star-claim-product').value=p?p.phase+':'+p.id:options[0].value;
-    renderAccountSelection(loginId);$('star-reservation').showModal();
-  });}
+    const dialog=$('star-reservation'),select=$('star-claim-product'),status=$('star-product-name');
+    claimProducts=[];
+    select.replaceChildren();
+    select.value='';
+    status.textContent='现在发起，无需等待预约时间';
+    renderAccountSelection(loginId);
+    dialog.showModal();
+    claimProducts=loginId?[]:model.products;
+    if(!claimProducts.length){
+      status.textContent='正在读取官方权益…';
+      const query=loginId?'?login_id='+encodeURIComponent(loginId):'';
+      const request=new AbortController();
+      claimCatalogRequest=request;
+      try{
+        const result=await api('products'+query,undefined,request.signal);
+        if(request.signal.aborted)return;
+        claimProducts=result.products;
+      }catch(error){
+        if(request.signal.aborted)return;
+        throw error;
+      }finally{
+        claimCatalogRequest=null;
+        status.textContent='现在发起，无需等待预约时间';
+      }
+    }
+    if(!claimProducts.length)throw new Error('官方当前暂无可选权益。');
+    const options=claimProducts.map(item=>{const option=node('option','',`${item.name} · 第 ${item.phase} 组 · ${item.stock==null?'库存以官方为准':item.stock>=100?'已领完':`已领 ${item.stock}%`}`);option.value=item.phase+':'+item.id;return option;});
+    select.replaceChildren(...options);
+    select.value=p?p.phase+':'+p.id:options[0].value;
+  },false);}
   function updateGiftSummary(){
     const daily=$('star-gift-mode').value==='daily';$('star-gift-timing').hidden=!daily;$('star-gift-timing').disabled=!daily;$('star-gift-submit').textContent=daily?'确认并启用抢购赠送':'确认赠送';const other=$('star-gift-kind').value==='phone';$('star-gift-family-field').hidden=other;$('star-gift-phone-field').hidden=!other;
     $('star-gift-family').required=!other;$('star-gift-phone').required=other;
@@ -98,8 +155,29 @@
   $('star-search').addEventListener('input',render);$('star-filter').addEventListener('change',render);
   $('star-settings-open').addEventListener('click',()=>{resetErrors();$('star-enabled').checked=model.settings.signin_enabled;$('star-time').value=model.settings.signin_time;$('star-prepare-time').value=model.settings.session_prepare_time||'09:30';$('star-settings').showModal();});
   $('star-settings-form').addEventListener('submit',e=>{e.preventDefault();mutate(async()=>{const v=await api('settings',{signin_enabled:$('star-enabled').checked,signin_time:$('star-time').value,session_prepare_time:$('star-prepare-time').value});$('star-settings').close();feedback(v.message);});});
-  $('star-reservation-form').addEventListener('submit',e=>{e.preventDefault();mutate(async()=>{const selected=claimNow?model.products.find(p=>p.phase+':'+p.id===$('star-claim-product').value):product;if(!selected)throw new Error('请选择要领取的权益。');const body={product_id:selected.id,phase:selected.phase,login_ids:[...document.querySelectorAll('#star-account-options input:checked')].map(b=>b.value)};if(!claimNow)Object.assign(body,{offsets_ms:offsetValues()});const v=await api(claimNow?'claim':'jobs',body);$('star-reservation').close();feedback(v.message);});});
-  document.querySelectorAll('[data-star-close]').forEach(b=>b.addEventListener('click',()=>{if(!working)b.closest('dialog').close();}));
-  document.querySelectorAll('dialog').forEach(d=>d.addEventListener('cancel',e=>{if(working)e.preventDefault();}));
+  $('star-reservation-form').addEventListener('submit',e=>{
+    e.preventDefault();
+    mutate(async()=>{
+      const selected=claimNow?claimProducts.find(p=>p.phase+':'+p.id===$('star-claim-product').value):product;
+      if(!selected)throw new Error('请选择要领取的权益。');
+      const body={product_id:selected.id,phase:selected.phase,login_ids:[...document.querySelectorAll('#star-account-options input:checked')].map(b=>b.value)};
+      if(!claimNow)Object.assign(body,{offsets_ms:offsetValues()});
+      resetErrors();
+      updateAccountSelection();
+      const v=await api(claimNow?'claim':'jobs',body);
+      $('star-reservation').close();
+      feedback(v.message);
+      if(claimNow&&window.matchMedia('(max-width: 900px)').matches)$('star-feedback').scrollIntoView({block:'center'});
+    });
+  });
+  function canClose(dialog){
+    if(dialog===$('star-reservation')&&claimCatalogRequest){
+      claimCatalogRequest.abort();
+      return true;
+    }
+    return !working;
+  }
+  document.querySelectorAll('[data-star-close]').forEach(b=>b.addEventListener('click',()=>{const dialog=b.closest('dialog');if(canClose(dialog))dialog.close();}));
+  document.querySelectorAll('dialog').forEach(d=>d.addEventListener('cancel',e=>{if(!canClose(d))e.preventDefault();}));
   window.addEventListener('accounts-changed',refresh);window.addEventListener('focus',refresh);refresh(true);setInterval(updateSms,1000);setInterval(()=>{if(!document.hidden&&!working)refresh();},5000);
 })();

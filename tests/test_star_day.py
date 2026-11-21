@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import hashlib
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -534,6 +535,43 @@ class SchedulerTests(unittest.TestCase):
 
 
 class RouteTests(unittest.TestCase):
+    def test_products_use_the_requested_account_without_falling_back(self):
+        from workspace_test_support import create_app
+
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(database_path=Path(directory) / 'accounts.sqlite3')
+            scheduler = app.extensions['star_day_scheduler']
+            accounts = [{'id':'a', 'name':'账号 A', 'status':'active'},
+                        {'id':'b', 'name':'账号 B', 'status':'active'},
+                        {'id':'c', 'name':'账号 C', 'status':'login_required'}]
+            calls = []
+
+            def client_for(provider):
+                login_id = provider()['id']
+                calls.append(login_id)
+                return SimpleNamespace(products=lambda: [{'id':login_id, 'phase':1, 'name':'会员月卡'}])
+
+            with patch.object(scheduler, 'activity_accounts', return_value=accounts), \
+                    patch.object(scheduler, 'credentials', side_effect=lambda login_id: {'id':login_id}), \
+                    patch.object(scheduler, 'client_factory', side_effect=client_for):
+                with app.test_client() as http:
+                    default = http.get('/api/star-day/products')
+                    selected = http.get('/api/star-day/products', query_string={'login_id':'b'})
+                    self.assertEqual(default.json['products'][0]['id'], 'a')
+                    self.assertEqual(selected.json['products'][0]['id'], 'b')
+                    self.assertEqual(http.get('/api/star-day/status').json['products'][0]['id'], 'a')
+                    accepted = http.post('/api/star-day/claim', json={'login_ids':['b'], 'product_id':'b', 'phase':1})
+                    self.assertEqual(accepted.status_code, 200, accepted.json)
+                    rejected = http.post('/api/star-day/claim', json={'login_ids':['a'], 'product_id':'b', 'phase':1})
+                    self.assertEqual(rejected.json['code'], 'PRODUCT_MISSING')
+                    for login_id in ('c', 'missing', ''):
+                        with self.subTest(login_id=login_id):
+                            response = http.get('/api/star-day/products', query_string={'login_id':login_id})
+                            self.assertEqual(response.status_code, 401)
+                            self.assertEqual(response.json['code'], 'APP_LOGIN_REQUIRED')
+
+            self.assertEqual(calls, ['a', 'b'])
+
     def test_page_status_and_input_errors_with_empty_shared_pool(self):
         from workspace_test_support import create_app
         app=create_app();http=app.test_client()

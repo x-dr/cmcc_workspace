@@ -3,12 +3,14 @@
   const nav = document.getElementById('workspace-navigation');
   if (!nav) return;
   let counts = {}, couponTotal = 0, loading = false, pending = false;
+  const benefitLabels = {'/member-benefits':'会员权益', '/net-age':'网龄权益'};
 
   function render() {
     for (const item of nav.querySelectorAll('[data-issue-key]')) {
       const key = item.dataset.issueKey;
       const count = counts[key] || 0;
-      const badgeClass = key === '/member-benefits' ? 'workspace-coupon-badge' : 'workspace-issue-badge';
+      const benefit = benefitLabels[key];
+      const badgeClass = benefit ? 'workspace-coupon-badge' : 'workspace-issue-badge';
       let badge = item.querySelector(`.${badgeClass}`);
       if (!badge) {
         badge = document.createElement('span');
@@ -19,7 +21,7 @@
       }
       badge.hidden = count === 0;
       badge.textContent = String(count);
-      badge.title = key === '/member-benefits' ? `${count} 次会员权益可领取（按各账号最近查询统计）` : `${count} 个失败或待处理问题`;
+      badge.title = benefit ? `${count} 次${benefit}可领取（按各账号最近查询统计）` : `${count} 个失败或待处理问题`;
       badge.setAttribute('aria-label', badge.title);
       if(key === '/coupons'){
         let coupons=item.querySelector('.workspace-coupon-badge');
@@ -47,6 +49,9 @@
       if (document.getElementById('member-accounts')) {
         window.dispatchEvent(new CustomEvent('member-benefit-counts-updated', {detail: result.member_benefit_counts || {}}));
       }
+      if (document.getElementById('age-accounts')) {
+        window.dispatchEvent(new CustomEvent('net-age-counts-updated', {detail: result.net_age_counts || {}}));
+      }
     } catch { /* Retain the last confirmed counts while reconnecting. */ }
     finally {
       loading = false;
@@ -60,6 +65,7 @@
   window.addEventListener('accounts-changed', refresh);
   window.addEventListener('coupon-reminders-changed', refresh);
   window.addEventListener('member-benefits-changed', refresh);
+  window.addEventListener('net-age-counts-changed', refresh);
   document.addEventListener('visibilitychange', refresh);
   setInterval(refresh, 10000);
   refresh();

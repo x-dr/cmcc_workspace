@@ -89,6 +89,24 @@ class WednesdayCheckinTests(unittest.TestCase):
         self.daily.next_scan=None;self.daily.tick();self.daily.pool.submit.assert_not_called()
         self.now+=timedelta(days=1);self.daily.tick();self.daily.pool.submit.assert_called_once()
 
+    def test_failed_query_has_its_own_time_and_a_successful_read_clears_the_failure(self):
+        self.client.read.side_effect = ActivityError('官方活动登录响应格式无效', 'APP_SSO_FORMAT', 502)
+        with self.assertRaises(ActivityError):
+            self.daily.run('a')
+        failed = self.daily.snapshots()['records']['a']
+        self.assertEqual(failed['attempted_at'], self.now.isoformat())
+        self.assertEqual(failed['attempts'], 1)
+        self.assertNotIn('progress', failed)
+
+        self.now += timedelta(minutes=1)
+        self.client.read.side_effect = None
+        self.client.read.return_value = progress(1, True)
+        self.daily.run('a')
+        recovered = self.daily.snapshots()['records']['a']
+        self.assertEqual((recovered['state'], recovered['error_code'], recovered['attempts']), ('ready', None, 0))
+        self.assertTrue(recovered['progress']['today_signed'])
+        self.client.call.assert_not_called()
+
     def test_ineligible_and_rate_limit_are_daily_blocks_not_changed_by_cookie_revision(self):
         for error in (ActivityError('不符合活动资格','NOT_ELIGIBLE'),ActivityError('请求频繁','-800')):
             self.client.read.side_effect=error;self.daily.run('a',submit=True)

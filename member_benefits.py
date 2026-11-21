@@ -538,7 +538,7 @@ class MemberBenefits:
                     if os.environ.get('LINGXI_ANDROID') == '1' and (benefit.get('claim_flow') == 'campus' or benefit['kind'] == '五折购'):
                         benefit['local_order_notice'] = ANDROID_ORDER_NOTICE
                     if (benefit['kind'] != '礼包' and benefit['can_inspect']
-                            and not benefit['claimed'] and benefit['remaining'] != 0 and 'local_order_notice' not in benefit):
+                            and not benefit['claimed'] and benefit['remaining'] != 0):
                         try:
                             benefit['selection'] = self._benefit_offers(session, benefit, member['id'])
                         except MemberBenefitsError as error:

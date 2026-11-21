@@ -521,6 +521,20 @@ class MemberBenefitsTests(unittest.TestCase):
         prepared = self.service.discount_prepare('login-a', '1447', benefit['key'], '2191')
         self.assertEqual(prepared['purchase_preview']['price_cents'], 1500)
 
+    def test_android_lists_discount_choices_before_order_validation(self):
+        discount = self.add_discount_member()
+        with patch.dict('os.environ', LINGXI_ANDROID='1'):
+            self.calls.clear()
+            members = self.service.query('login-a')['members']
+            benefit = next(item for item in members[-1]['benefits'] if item['key'] == discount['key'])
+            self.assertEqual([(offer['id'], offer['price_cents']) for offer in benefit['selection']['offers']],
+                             [('2192', 1250), ('2191', 1500)])
+            self.assertTrue(benefit['local_order_notice'])
+            with self.assertRaises(MemberBenefitsError) as error:
+                self.service.discount_prepare('login-a', '1447', discount['key'], '2191')
+            self.assertEqual(error.exception.code, 'MEMBER_ORDER_UNSUPPORTED')
+        self.assertFalse(any(url.endswith((CAMPUS_SMS, CAMPUS_ORDER)) for _, url in self.calls))
+
     def test_claimed_names_follow_confirmed_skus_and_look_up_each_missing_name_once(self):
         for member_id, name in ((1447, '黔心选铂金会员'), (1452, '黔心选商超会员')):
             self.add_discount_member(member_id, name)

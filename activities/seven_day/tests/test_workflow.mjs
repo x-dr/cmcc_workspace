@@ -91,13 +91,12 @@ test('a rejected activity login offers account recovery even while the primary a
   assert.equal(calls.some(c=>c.body),false);
 });
 
-test('the activity explains sold-out early closure separately from its scheduled date',async()=>{
+test('sold out check-in rewards leave the official daily draw available',async()=>{
   const {get,model,calls}=await fixture();
-  model.campaign={...model.campaign,active:false,ended:true,end_reason:'sold_out',sold_out:true};
+  model.campaign={...model.campaign,active:true,ended:false,sold_out:true};
   await get('seven-refresh').click();await flush();
-  assert.equal(get('seven-ended-title').textContent,'红包已领完，活动提前结束');
-  assert.match(get('seven-ended-description').textContent,/打卡和夺宝同步停止/);
+  assert.equal(get('seven-ended').hidden,true);
+  assert.match(get('seven-warning').textContent,/打卡红包已抢完/);
   assert.match(get('seven-period').textContent,/计划至/);
-  assert.match(get('seven-expiry-note').textContent,/计划截止时间/);
   assert.ok(calls.every(call=>!call.body));
 });

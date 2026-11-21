@@ -36,7 +36,7 @@ class AccessBoundaryTests(unittest.TestCase):
         response = self.get('/coupons?login_id=example')
         self.assertEqual(response.status_code, 303)
         self.assertIn('/access?next=', response.location)
-        for path in ('/api/logins', '/api/platforms', '/recharge/api/accounts', '/recharge/',
+        for path in ('/api/logins', '/api/platforms', '/recharge/api/accounts', '/recharge/', '/net-age', '/api/net-age/accounts',
                      '/static/app.js', '/recharge/static/workspace.js'):
             with self.subTest(path=path):
                 response = self.get(path)
@@ -51,7 +51,7 @@ class AccessBoundaryTests(unittest.TestCase):
         self.assertIn('HttpOnly', cookie)
         self.assertIn('SameSite=Strict', cookie)
         self.assertIn('Path=/', cookie)
-        for path in ('/', '/coupons', '/api/logins', '/recharge/', '/recharge/api/accounts'):
+        for path in ('/', '/coupons', '/api/logins', '/recharge/', '/recharge/api/accounts', '/net-age', '/api/net-age/accounts'):
             self.assertEqual(self.get(path).status_code, 200, path)
 
     def test_remote_login_is_required_for_root_and_mounted_apis(self):

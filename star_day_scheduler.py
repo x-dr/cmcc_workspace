@@ -27,6 +27,7 @@ class StarDayScheduler:
         self.lock, self.quit, self.thread = RLock(), Event(), None
         self.running, self.checked, self.readiness = set(), {}, {}
         self.catalog = []
+        self.account_catalogs = {}
         self.calibration, self.calibrating, self.starts = None, False, {}
         self.cancellations = {}
         self.data = {'settings': {'signin_enabled': True, 'signin_time': '00:01', 'session_prepare_time':'09:30'},
@@ -168,13 +169,21 @@ class StarDayScheduler:
         self._queue(login_id,'inspect')
         return result
 
-    def products(self):
-        account = next((a for a in self.activity_accounts() if a['status'] == 'active'), None)
-        if account is None:
+    def products(self, login_id=None):
+        active = [account['id'] for account in self.activity_accounts() if account['status'] == 'active']
+        account_id = next(iter(active), None) if login_id is None else login_id
+        if account_id not in active:
+            if login_id is not None:
+                raise StarDayError('请选择已登录的星动日账号，再读取官方权益列表。', 'APP_LOGIN_REQUIRED', 401)
             raise StarDayError('请先登录一个有效账号，再读取官方权益列表。', 'APP_LOGIN_REQUIRED', 401)
-        products = self.client_factory(lambda: self.credentials(account['id'])).products()
+        products = self.client_factory(lambda: self.credentials(account_id)).products()
         with self.lock:
-            self.catalog = products
+            if login_id is None:
+                self.catalog = products
+            else:
+                self.account_catalogs = {account: catalog for account, catalog in self.account_catalogs.items()
+                                         if account in active}
+                self.account_catalogs[account_id] = products
         return deepcopy(products)
 
     def calibrate(self, queued=False):
@@ -233,13 +242,6 @@ class StarDayScheduler:
                 at = requested.replace(hour=10, minute=0, second=0, microsecond=0)
             if at <= self.now():
                 at += timedelta(days=1)
-        if not self.catalog:
-            self.products()
-        product = next((p for p in self.catalog if p['id'] == product_id and p['phase'] == phase), None)
-        if product is None:
-            raise StarDayError('此权益未在当前官方列表中，请刷新后选择。', 'PRODUCT_MISSING', 409)
-        if recipient is not None and not product.get('transferable'):
-            raise StarDayError('官方不支持赠送此权益。', 'NOT_TRANSFERABLE', 409)
         known = {a['id']:a for a in self.activity_accounts()}
         ids = payload.get('login_ids', [a['id'] for a in known.values() if a['status'] == 'active'])
         if not isinstance(ids, list) or not ids or any(not isinstance(i, str) or i not in known for i in ids):
@@ -248,6 +250,20 @@ class StarDayScheduler:
             raise StarDayError('请先恢复所选账号的登录。', 'APP_LOGIN_REQUIRED', 401)
         if recipient is not None and len(set(ids)) != 1:
             raise StarDayError('每次赠送请选择一个来源账号。', 'INVALID_SELECTION', 400)
+        with self.lock:
+            catalogs = []
+            if immediate and recipient is None:
+                catalogs.extend(self.account_catalogs[login_id] for login_id in ids if login_id in self.account_catalogs)
+            if self.catalog:
+                catalogs.append(self.catalog)
+        if not catalogs:
+            catalogs.append(self.products())
+        product = next((entry for catalog in catalogs for entry in catalog
+                        if entry['id'] == product_id and entry['phase'] == phase), None)
+        if product is None:
+            raise StarDayError('此权益未在当前官方列表中，请刷新后选择。', 'PRODUCT_MISSING', 409)
+        if recipient is not None and not product.get('transferable'):
+            raise StarDayError('官方不支持赠送此权益。', 'NOT_TRANSFERABLE', 409)
         recipient_label = ''
         if recipient is not None:
             options = self.gift_options(ids[0])

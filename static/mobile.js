@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   if (!document.body.classList.contains('workspace-app')) return;
-  const strips = '#bills-accounts,#coupons-accounts,#home-accounts,#chat-account-list,#rights-accounts';
+  const strips = '#bills-accounts,#coupons-accounts,#age-accounts,#home-accounts,#chat-account-list,#rights-accounts';
   const selection = new WeakMap(), pending = new Set();
   const phone = matchMedia('(max-width: 900px)');
   let frame = 0;

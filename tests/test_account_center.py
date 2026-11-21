@@ -351,6 +351,34 @@ class AccountCenterTests(unittest.TestCase):
         self.assertEqual(self.a.status, 'active')
         flow.send_sms.assert_called_once()
 
+    @patch('app.verify_token')
+    @patch('app.exchange_cookie', return_value='renewed-token')
+    @patch('app.AppLoginSession')
+    def test_relogin_slider_challenge_resumes_the_same_sms_login(self, factory, exchange, verify):
+        flow = factory.return_value = self.sms_flow()
+        challenge = AppLoginError('需要滑块', code='214100', challenge={'id': 'login-challenge'})
+        flow.login.side_effect = [challenge, 'JSESSIONID=renewed']
+        flow.slider_required = True
+        store = self.app.extensions['unified_logins']
+        store.mark(self.a, 'login_required')
+        self.http.post('/api/logins/relogin/sms', json={'id': self.a.id})
+
+        first = self.http.post('/api/logins/relogin', json={
+            'id': self.a.id, 'code': '123456', 'sms_request_id': flow.sms_request_id})
+        self.assertEqual(first.status_code, 400)
+        self.assertEqual(first.json['challenge'], {'id': 'login-challenge'})
+        self.assertIs(store.pending[self.a.phone], flow)
+
+        second = self.http.post('/api/logins/relogin', json={
+            'id': self.a.id, 'code': '', 'sms_request_id': flow.sms_request_id,
+            'risk_token': 'official-human-token', 'challenge_id': 'login-challenge'})
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(flow.login.call_args_list, [
+            unittest.mock.call(self.a.phone, '123456'),
+            unittest.mock.call(self.a.phone, '', risk_token='official-human-token', challenge_id='login-challenge'),
+        ])
+        self.assertEqual(self.a.status, 'active')
+
 
     @patch('app.verify_token')
     @patch('app.exchange_cookie', return_value='renewed-token')

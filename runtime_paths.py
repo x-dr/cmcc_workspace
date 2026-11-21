@@ -14,4 +14,4 @@ elif sys.platform == 'win32':
 else:
     DATA_DIR=Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local/share')/'LingxiWorkspace'
 RECHARGE_DATA_DIR=DATA_DIR/'recharge' if FROZEN or os.environ.get('LINGXI_DATA_DIR') else ROOT/'recharge/.local'
-VERSION='1.9.0'
+VERSION='1.9.4'

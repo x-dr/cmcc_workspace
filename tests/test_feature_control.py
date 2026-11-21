@@ -188,6 +188,21 @@ class FeatureControlTests(unittest.TestCase):
         self.assertEqual(len(prepared.starts), 1)
         self.assertEqual(result['attempt_count'], 1)
 
+    def test_flash_timers_stop_when_their_feature_is_disabled(self):
+        from checkin_flash import run_flash_burst
+        from tests.test_checkin_flash import Prepared
+
+        def reply(_index):
+            self.control.set_enabled('checkin', False)
+            return {'state': 'retryable', 'message': '繁忙'}
+
+        prepared = Prepared(reply, delay=0)
+        with feature_scope(FeatureLease(self.control, 'checkin')):
+            result = run_flash_burst(prepared, {'burst_count': 5, 'burst_interval': 0.1},
+                                     lambda: None, lambda: False, followup_seconds=None,
+                                     stop_on_result=False, use_timers=True)
+        self.assertEqual((result['state'], result['attempt_count']), ('stopped', 1))
+
 
 class AppFeatureTests(unittest.TestCase):
     def test_real_app_blocks_every_business_route_and_mounted_recharge(self):

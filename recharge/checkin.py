@@ -178,7 +178,8 @@ class ContinuousCheckin:
                 if client.credential_cache is not None:client.credential_cache.sync(client.http)
                 tomorrow=now.replace(hour=int(self.data['settings']['time'][:2]),minute=int(self.data['settings']['time'][3:]),second=0,microsecond=0)+timedelta(days=1)
                 next_at=now if not submit and progress['action'] in {'sign','claim'} else tomorrow
-                self._update(login_id,message=progress['message'],state='ready',error_code=None,attempt_date=day,attempts=0,blocked=False,next_at=next_at.isoformat())
+                self._update(login_id,message=progress['message'],state='ready',error_code=None,attempt_date=day,
+                             attempted_at=progress['queried_at'],attempts=0,blocked=False,next_at=next_at.isoformat())
                 return progress
         except (ActivityError,RequestException) as error:
             if not isinstance(error,ActivityError):error=ActivityError('连接官方打卡接口失败，请稍后查询核对。','UPSTREAM_NETWORK',502)
@@ -188,7 +189,8 @@ class ContinuousCheckin:
             # Definitive restrictions and authentication failures are not repeatedly retried.
             blocked=error.status in {401,403,429} or error.code in {'-800','8053','160019','160030','HTTP_ACCESS_LIMIT','APP_SSO_FAILED','SIGN_TASK_CHANGED'} or any(t in str(error) for t in ('不符合','无参与资格','不可参与'))
             self._update(login_id,message=str(error),state='failed',error_code=error.code,attempt_date=day,attempts=attempts,
-                         attempt_revision=login.get('credential_revision'),blocked=blocked,next_at=(now+timedelta(minutes=5)).isoformat())
+                         attempted_at=self.now().isoformat(),attempt_revision=login.get('credential_revision'),
+                         blocked=blocked,next_at=(now+timedelta(minutes=5)).isoformat())
             logging.getLogger(__name__).info('周三连续打卡未完成：%s',error.code)
             if submit:return {'error':str(error),'code':error.code}
             raise error

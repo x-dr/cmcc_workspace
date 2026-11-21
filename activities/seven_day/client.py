@@ -4,28 +4,16 @@ Protocol: dailyLoginEvent index-BsvlzBlx / daily-login.service-CCdoEszk,
 and official rules version 20261028112703. Request construction and crypto
 belong to this Python module; no browser is part of business execution.
 """
-from __future__ import annotations
-
-import base64
 from datetime import datetime
 import json
 from pathlib import Path
 import re
-import secrets
 import time
 
-from cryptography.hazmat.primitives import padding, serialization
-from cryptography.hazmat.primitives.asymmetric import padding as rsa_padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-
-from app_login import AppCredentialError, AppLoginError, AppLoginSession
+from activities.coc_client import API, ORIGIN, CocClient, CocError as SevenDayError
 from http_transport import requests
-from recharge.cmcc import APP_UA, SHANGHAI
-from star_day_auth import encrypt_uid
-from .environment import collect
+from recharge.cmcc import SHANGHAI
 
-ORIGIN = 'https://dev.coc.10086.cn'
-API = ORIGIN + '/coc/'
 PAGE_ID = '2090341662452445184'
 CHANNEL = 'P00000129418'
 ENTRY = ORIGIN + '/coc/web6/dailyLoginEvent/?pageId=' + PAGE_ID + '&channelId=' + CHANNEL
@@ -41,8 +29,6 @@ DRAW_PRIZES = dict(zip([str(i) for i in range(130000010668, 130000010676)],
                       ['88元话费兑换券', '66元话费兑换券', '0.5元话费兑换券', '1元话费兑换券',
                        '2元话费兑换券', '1GB流量日包券', '2GB流量日包券', '5GB7日流量券']))
 DRAW_PRIZES['999999999999'] = '未中奖'
-PUBLIC_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0a66eNBd/ioaGnEM2AV+ctQX8VYt6dszzI8zOv26Kc1A7ex/cu/txmbB6WrU5ARoTeS0gk3KS21e/xP1BR1FUqL/+YJ4v8gpFY21/2gWuEPVBoHEd34FMpDRuiQkpmrvuuRF+QJQIg5ASEBpwz4n15ltl7Fd4E+NLp/JRJxzNR55ZeVLLFaucWYe8FIvX5BKx8i+sJWZYDoxTbjrBTy2CZDZObT+PxhOBXsCkolsG8Ux+tIAoU+UAVSQ0qT62z/sHPVPngHAqmLP/sF3IM6Mrub7BqhwJe3rvddqrw+Q2Jg8upZ/oUlZvXtQZCxJXtg0eJVdKTmnE6hD+/M99ukEoQIDAQAB'
-
 DEFAULT_CAMPAIGN = {
     'title': '7日打卡分百万', 'start_at': '2026-10-31T09:00:00+08:00',
     'end_at': '2026-11-30T23:59:59+08:00',
@@ -50,47 +36,6 @@ DEFAULT_CAMPAIGN = {
     'notice': '规则正文至12月31日，当前官方页面配置11月30日下线；本页跟随官方页面时间。',
 }
 DEFAULT_CAMPAIGN['rules_text'] = (Path(__file__).resolve().parent/'static/seven-day-rules.txt').read_text('utf-8')
-
-
-class SevenDayError(Exception):
-    def __init__(self, message, code='SEVEN_DAY_ERROR', status=502, *, uncertain=False):
-        super().__init__(message)
-        self.code, self.status, self.uncertain = code, status, uncertain
-
-
-def _aes_encrypt(value, key):
-    pad = padding.PKCS7(128).padder()
-    plain = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
-    cipher = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
-    return base64.b64encode(cipher.update(pad.update(plain) + pad.finalize()) + cipher.finalize()).decode()
-
-
-def _encrypted(value, kind):
-    key = secrets.token_hex(8).encode()
-    public = serialization.load_der_public_key(base64.b64decode(PUBLIC_KEY))
-    content = _aes_encrypt(value, key)
-    if kind == 'meteor':
-        header = {'coc-meteor': base64.b64encode(public.encrypt(base64.b64encode(key), rsa_padding.PKCS1v15())).decode(), 'coc-meteor-v': '2'}
-        content = base64.b64encode(content.encode()).decode()
-    else:
-        header = {'Coc-En-Version': '1486234121417629696', 'coc-aurora-v': '2',
-                  'coc-aurora': base64.b64encode(public.encrypt(key, rsa_padding.PKCS1v15())).decode()}
-    return {'cocEnContent': content}, header, key
-
-
-def _decode(response, key=None):
-    if not isinstance(response, dict):
-        raise SevenDayError('官方响应格式异常', 'UPSTREAM_FORMAT')
-    if key is not None and response.get('returnData'):
-        cipher = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
-        unpad = padding.PKCS7(128).unpadder()
-        raw = cipher.update(base64.b64decode(response['returnData'])) + cipher.finalize()
-        response = json.loads((unpad.update(raw) + unpad.finalize()).decode())
-    if str(response.get('code')) != '0':
-        code = str(response.get('code', 'UNKNOWN'))[:60]
-        message = str(response.get('message') or '官方暂未完成此操作')[:300]
-        raise SevenDayError(message + '（' + code + '）', code, 401 if code == '40' else 502)
-    return response.get('data')
 
 
 def campaign_config(*, session=None):
@@ -114,157 +59,21 @@ def campaign_config(*, session=None):
             client.close()
 
 
-class SevenDayClient:
+class SevenDayClient(CocClient):
     def __init__(self, credentials_provider, *, session_factory=None, sdk_encrypt=None, credential_cache=None,
                  app_session_recover=None):
-        self.credentials_provider = credentials_provider
-        self.session_factory = session_factory or (lambda: requests.Session(impersonate='chrome'))
-        self.sdk_encrypt = sdk_encrypt
-        self.credential_cache = credential_cache
-        self.app_session_recover = app_session_recover
-        self.identity_recovered = False
-        self.client = None
-        self.snapshot = None
-        self.user = {}
-
-    def current(self):
-        latest = self.credentials_provider()
-        if (latest is None or latest.get('phone') != self.snapshot.get('phone')
-                or self.credential_cache is None and latest.get('cookie') != self.snapshot['cookie']):
-            raise SevenDayError('共享账号登录已更新，请重新获取本次验证', 'APP_CREDENTIALS_CHANGED', 409)
-
-    def connect(self):
-        snapshot = self.credentials_provider()
-        cookie = snapshot.get('cookie', '') if isinstance(snapshot, dict) else ''
-        uid = re.search(r'(?:^|;)\s*UID=([^;]+)', cookie, re.I)
-        if not uid or not re.search(r'(?:^|;)\s*JSESSIONID=', cookie, re.I) or not re.fullmatch(r'1[3-9]\d{9}', str(snapshot.get('phone', ''))):
-            raise SevenDayError('共享账号需要重新登录，请在账号管理恢复登录', 'APP_LOGIN_REQUIRED', 401)
-        self.snapshot = snapshot
-        self.client = self.session_factory()
-        self.client.headers.update({'User-Agent': APP_UA, 'Origin': ORIGIN, 'Referer': ENTRY,
-                                    'Accept-Language': 'zh-CN,zh;q=0.9'})
-        if self.credential_cache is None:
-            self._authenticate()
-        else:
-            data = self.credential_cache.connect('seven-day',snapshot,self.client,
-                self._authenticate)
-            self.user = data['user']
-        return self
+        super().__init__(credentials_provider, entry=ENTRY, session_factory=session_factory,
+                         credential_cache=credential_cache, app_session_recover=app_session_recover,
+                         sdk_encrypt=sdk_encrypt)
 
     def _authenticate(self):
-        # Cached-session recovery must read today's primary identity, rather
-        # than the snapshot captured when the expired activity cookie was made.
-        snapshot = self.credentials_provider()
-        if snapshot is None or snapshot['phone'] != self.snapshot['phone']:
-            raise SevenDayError('共享账号已退出或切换，请重新选择账号', 'APP_LOGIN_REQUIRED', 401)
-        uid = re.search(r'(?:^|;)\s*UID=([^;]+)', snapshot['cookie'], re.I)
-        if uid is None:
-            raise SevenDayError('共享账号缺少活动身份，请重新登录', 'APP_LOGIN_REQUIRED', 401)
-        uid = uid[1]
-        self.snapshot = snapshot
-        try:
-            flow = AppLoginSession.from_credentials(snapshot)
-            _, result, _ = flow.call('/biz-orange/LN/checkUIDAction/checkUID', {
-                'channelId': '12093', 'domain': ORIGIN, 'url': ENTRY,
-                'tel': snapshot['phone'], 'uId': uid,
-            })
-        except AppLoginError as error:
-            raise SevenDayError('APP 活动认证暂未完成，请校验并重连', 'APP_UID_FAILED') from error
-        if str(result.get('retCode')) != '000000':
-            raise SevenDayError('APP 活动认证暂未完成（'+str(result.get('retCode'))[:40]+'）', 'APP_UID_FAILED')
-        self.current()
-        try:
-            self.user = self.post('user/loginCheck', {'uid': encrypt_uid(uid), 'verifyType': 1}, encryption='aurora')
-        except SevenDayError as error:
-            # These observed loginCheck rejections are not permission to
-            # replay a business request carrying the same numeric code.
-            if error.code not in ('1','30'):
-                raise
-            if self.app_session_recover is None or self.identity_recovered:
-                raise SevenDayError('七日活动登录未通过（'+error.code+'），请重新登录此共享账号后查询；尚未提交打卡。',
-                                    'ACTIVITY_LOGIN_REQUIRED', 401) from error
-            self.identity_recovered = True
-            try:
-                self.app_session_recover(snapshot)
-            except AppLoginError as renewal:
-                required = isinstance(renewal, AppCredentialError) and renewal.login_required
-                raise SevenDayError(str(renewal), 'APP_LOGIN_REQUIRED' if required else 'APP_REFRESH_FAILED',
-                                    401 if required else 502) from renewal
-            self.client.cookies.clear()
-            return self._authenticate()
+        data = super()._authenticate()
         # The shipped Jl() returns a growthInfo object even for level="";
         # Ba() checks that object, not whether its level is in V1–V5.
         # post() already checks the official response code. An empty level
         # must not become a local rejection before querying campaign progress.
         self.post('activities/growth/query', {'touchCode': 'P00000001090', 'provinceCode': self.user.get('provinceCode', '')})
-        return {'user':self.user}
-
-    def close(self):
-        if self.client is not None:
-            self.client.close()
-            self.client = None
-
-    def environment(self):
-        # These are authenticated activity context values, not invented browser
-        # hardware or automation-detection values. The host remains Python.
-        return {**collect(), 'wasm_ver': '0.0.3',
-                'page_url': ENTRY, 'hostname': 'dev.coc.10086.cn',
-                'protocol': 'https:', 'port': '', 'referer': ENTRY, 'events': '',
-                'user_agent': self.client.headers['User-Agent'], 'language': 'zh-CN',
-                'languages': ['zh-CN'], 'on_line': True, 'cookie_enabled': True,
-                'main_script': '', 'collection_time': int(time.time()*1000),
-                'local_storage': {'benefit_phone': self.snapshot['phone'], 'pageId': PAGE_ID,
-                                  'channelId': CHANNEL, 'userId': self.user.get('userId', '')},
-                'cookie': {cookie.name: cookie.value for cookie in self.client.cookies.jar},
-                'tls_fingerprint': {'has_subtle_crypto': False, 'is_secure_context': True,
-                                    'protocol': 'https:', 'user_agent_contains_ssl': 'ssl' in APP_UA.lower()}}
-
-    def post(self, path, payload, *, encryption=None, mutation=False, before_submit=None):
-        key, headers, body = None, {}, payload
-        if encryption in ('aurora', 'meteor'):
-            body, headers, key = _encrypted(payload, encryption)
-        elif encryption == 'wheel':
-            from .crypto import encrypt, SevenDayCryptoError
-            def transport(body, headers):
-                self.current()
-                try:
-                    result = self.client.post(API+'wasmrc/gDT', json=body, headers=headers,
-                                              timeout=(8, 20), allow_redirects=False)
-                except requests.RequestsError as error:
-                    raise SevenDayCryptoError('官方设备令牌服务连接失败，本次未提交业务请求。', 'DEVICE_TOKEN_NETWORK') from error
-                if result.status_code != 200:
-                    raise SevenDayCryptoError('官方设备令牌服务 HTTP '+str(result.status_code), 'DEVICE_TOKEN_HTTP')
-                try:
-                    return result.json()
-                except ValueError as error:
-                    raise SevenDayCryptoError('官方设备令牌响应格式异常', 'DEVICE_TOKEN_FORMAT') from error
-            try:
-                encrypted = (self.sdk_encrypt or encrypt)(payload, [], APP_UA, transport=transport, environment=self.environment)
-            except SevenDayCryptoError as error:
-                raise SevenDayError(str(error), error.code, error.status) from error
-            body, headers = encrypted['data'], encrypted['headers']
-        if mutation:
-            self.current()
-            if before_submit is not None:
-                before_submit()
-        try:
-            response = self.client.post(API + path, json=body, headers=headers, timeout=(8, 20), allow_redirects=False)
-        except requests.RequestsError as error:
-            raise SevenDayError('官方连接中断，将先核实结果后再决定后续操作', 'UPSTREAM_NETWORK', uncertain=mutation) from error
-        if response.status_code not in (200,401):
-            raise SevenDayError('官方接口 HTTP ' + str(response.status_code), 'UPSTREAM_HTTP', uncertain=mutation)
-        try:
-            value = {'code':'40'} if response.status_code == 401 else response.json()
-            return _decode(value, key if encryption == 'meteor' else None)
-        except SevenDayError as error:
-            if error.code == '40' and self.credential_cache is not None and getattr(self.client,'_credential_binding',None):
-                if not mutation and path != 'user/loginCheck' and self.credential_cache.recover(self.client):
-                    self.user = self.client._credential_data['user']
-                    return self.post(path,payload,encryption=encryption)
-                self.credential_cache.invalidate(self.client)
-            raise
-        except (ValueError, UnicodeError) as error:
-            raise SevenDayError('官方返回了非预期内容，将先查询结果', 'UPSTREAM_FORMAT', uncertain=mutation) from error
+        return data
 
     def inspect(self, now=None):
         now = now or datetime.now(SHANGHAI)

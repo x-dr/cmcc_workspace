@@ -21,6 +21,7 @@ from usage_query import register_usage
 from services_query import register_services
 from mobile_rights import register_mobile_rights
 from member_benefits import register_member_benefits
+from net_age import register_net_age
 from session_maintenance import SessionMaintenance
 from recharge.cmcc import ActivityError
 from lingxi_scheduler import LingxiScheduler, TaskError
@@ -119,6 +120,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
 
     def app_verification_busy(login_id, *, relogin=False):
         return (app.extensions['services_queries'].cancellations.busy_login(login_id)
+                or app.extensions['net_age'].busy_login(login_id)
                 or coupon_uses.busy_login(login_id, discard_previews=relogin))
 
     def refresh_app_credentials(saved, *, force=False, expired_cookie=None):
@@ -517,7 +519,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
 
     @app.get('/api/star-day/products')
     def star_day_products():
-        return jsonify(products=star_scheduler.products())
+        return jsonify(products=star_scheduler.products(request.args.get('login_id')))
 
     @app.post('/api/star-day/jobs')
     def star_day_schedule():
@@ -1136,21 +1138,35 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
                 raise TaskError('账号校验未通过，请校验并重连后重新预约') from error
 
     def send_scheduled_chat(login_id,content,on_sent):
-        with unified.lock:
-            saved=unified.get_id(login_id)
-            if saved is None or saved.status=='login_required' or not saved.token:
-                raise TaskError('共享账号尚未就绪，本次未发送')
-            revision=saved.credential_revision;token=saved.token
-            target=Account(auth_code=token,verified=True,app_phone=saved.phone)
+        def ready_credentials():
+            with unified.lock:
+                current=unified.get_id(login_id)
+                if current is None:
+                    raise TaskError('共享账号已退出，本次未发送')
+                if current.status=='login_required':
+                    raise TaskError('共享账号需要重新验证，本次未发送')
+                missing=not current.token
+            if missing:
+                try:ensure_token(current)
+                except (AppLoginError,LingxiError,RequestException) as error:
+                    raise TaskError('共享账号恢复未完成，本次未发送') from error
+            with unified.lock:
+                current=unified.get_id(login_id)
+                if current is None or current.status=='login_required' or not current.token:
+                    raise TaskError('共享账号恢复未完成，本次未发送')
+                return current,current.credential_revision,current.token
+
+        saved,revision,token=ready_credentials()
+        target=Account(auth_code=token,verified=True,app_phone=saved.phone)
         # Independent conversations allow the next scheduled request to start
         # while the previous one is still streaming its reply.
         def before_send():
-            nonlocal revision,token
+            nonlocal saved,revision,token
             with unified.lock:
-                latest=unified.get_id(login_id)
-                if latest is None or latest.status=='login_required' or not latest.token:
+                current=unified.get_id(login_id)
+                if current is None or current.status=='login_required' or not current.token:
                     raise TaskError('共享账号已退出或正在更新，本次未发送')
-                revision,token=latest.credential_revision,latest.token
+                saved,revision,token=current,current.credential_revision,current.token
                 target.auth_code=token
                 on_sent()
         try:yield from chat(target,content,before_send=before_send)
@@ -1237,6 +1253,7 @@ def create_app(*, enable_recharge=False, recharge_manager=None, recharge_schedul
     register_services(app, unified.public, unified.credentials, recover=recover_activity_identity,
                       accept_credentials=accept_bill_credentials)
     register_member_benefits(app, unified.credentials, credential_cache, recover=recover_activity_identity)
+    register_net_age(app, activity_credentials, unified.public, credential_cache, database, recover_activity_identity)
     register_mobile_rights(app, unified.public, unified.credentials, storage=database, cache=credential_cache,
                            recover=recover_activity_identity, accept_credentials=accept_bill_credentials)
 

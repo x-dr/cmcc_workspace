@@ -432,7 +432,7 @@ class SevenDayReuseTests(unittest.TestCase):
             self.sessions.append(http)
             return http
         self.factory = factory
-        self.patch = patch('activities.seven_day.client.AppLoginSession.from_credentials',return_value=self.flow)
+        self.patch = patch('activities.coc_client.AppLoginSession.from_credentials',return_value=self.flow)
         self.patch.start();self.addCleanup(self.patch.stop)
 
     def connect(self):

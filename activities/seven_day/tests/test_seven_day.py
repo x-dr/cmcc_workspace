@@ -14,7 +14,8 @@ from recharge.cmcc import SHANGHAI
 from activities.seven_day.client import (SevenDayClient, SevenDayError, DEFAULT_CAMPAIGN,
                               SIGN_ID, DRAW_ID, REWARD_ID, REWARD_SKU,
                               REWARD_CODE, REWARD_RIGHT, PAGE_ID, CHANNEL,
-                              _encrypted, _decode, _aes_encrypt, campaign_config)
+                              campaign_config)
+from activities.coc_client import _encrypted, _decode, _aes_encrypt
 from activities.seven_day.scheduler import SevenDayScheduler
 
 
@@ -417,20 +418,21 @@ class SevenDaySchedulerTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 'ACTIVITY_CLOSED')
         self.assertFalse(self.events)
 
-    def test_sold_out_ends_both_activities_and_survives_config_refresh(self):
+    def test_reward_sold_out_preserves_daily_draw_and_survives_config_refresh(self):
         self.state('a')['stock'] = 0
         self.scheduler.tick()
         self.queue.drain()
-        self.assertTrue(self.scheduler.metadata()['ended'])
-        self.assertEqual(self.scheduler.metadata()['end_reason'], 'sold_out')
+        self.assertTrue(self.scheduler.metadata()['active'])
+        self.assertTrue(self.scheduler.metadata()['sold_out'])
         self.assertEqual(self.scheduler.metadata()['end_at'], '2026-11-30T23:59:59+08:00')
         self.assertFalse(self.actions('signin'))
-        self.assertFalse(self.actions('draw'))
+        self.assertEqual(self.actions('draw'), [('a', 'draw')])
         self.scheduler.config_due = 0
         self.scheduler.tick()
         self.assertFalse(self.queue.jobs)
-        with self.assertRaises(SevenDayError):
-            self.scheduler.run('a', 'draw')
+        with self.assertRaises(SevenDayError) as raised:
+            self.scheduler.send_sms('a')
+        self.assertEqual(raised.exception.code, 'REWARD_SOLD_OUT')
 
     def test_forget_clears_persisted_account_and_pending_session(self):
         self.fill_seven_days()
@@ -655,8 +657,8 @@ class SevenDayClientContractTests(unittest.TestCase):
         client.post = Mock(side_effect=[{'userId': 'u', 'provinceCode': '851'}, {'level': 'V3'}])
         flow = Mock()
         flow.call.return_value = (None, {'retCode': '000000'}, None)
-        with patch('activities.seven_day.client.AppLoginSession.from_credentials', return_value=flow), \
-                patch('activities.seven_day.client.encrypt_uid', return_value='official-encrypted-uid'):
+        with patch('activities.coc_client.AppLoginSession.from_credentials', return_value=flow), \
+                patch('activities.coc_client.encrypt_uid', return_value='official-encrypted-uid'):
             client.connect()
         self.assertEqual(CHANNEL, 'P00000129418')
         args, _ = client.post.call_args
@@ -672,8 +674,8 @@ class SevenDayClientContractTests(unittest.TestCase):
         client=SevenDayClient(lambda:dict(material),session_factory=Mock)
         client.post=Mock(side_effect=[{'userId':'u','provinceCode':'851'},{'level':''}])
         flow=Mock();flow.call.return_value=(None,{'retCode':'000000'},None)
-        with patch('activities.seven_day.client.AppLoginSession.from_credentials',return_value=flow), \
-                patch('activities.seven_day.client.encrypt_uid',return_value='official-encrypted-uid'):
+        with patch('activities.coc_client.AppLoginSession.from_credentials',return_value=flow), \
+                patch('activities.coc_client.encrypt_uid',return_value='official-encrypted-uid'):
             self.assertIs(client.connect(),client)
         self.assertEqual(client.post.call_count,2)
         self.assertEqual(client.post.call_args.args[0],'activities/growth/query')
@@ -704,7 +706,7 @@ class SevenDayClientContractTests(unittest.TestCase):
         public = base64.b64encode(private.public_key().public_bytes(
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).decode()
         payload = {'amount': '5.0', 'name': '七日活动', 'pageId': PAGE_ID}
-        with patch('activities.seven_day.client.PUBLIC_KEY', public):
+        with patch('activities.coc_client.PUBLIC_KEY', public):
             for kind in ('meteor', 'aurora'):
                 with self.subTest(kind=kind):
                     body, headers, key = _encrypted(payload, kind)

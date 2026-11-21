@@ -78,18 +78,24 @@ def register_navigation_status(app, accounts, sources, platforms):
         member_counts = (member_benefits.available_counts({account['id'] for account in known_accounts})
                          if member_benefits is not None else {})
         counts['/member-benefits'] = sum(member_counts.values())
+        net_age = app.extensions.get('net_age')
+        net_age_counts = (net_age.available_counts({account['id'] for account in known_accounts if account['status'] == 'active'})
+                          if net_age is not None else {})
+        counts['/net-age'] = sum(net_age_counts.values())
         reminders = reminder_summary(snapshots.get('coupon_reminders', {}),
             [account['id'] for account in known_accounts], snapshots.get('coupons', {}), now)
         features = app.extensions.get('feature_control')
         for path, feature_id in {'/lingxi/tasks':'lingxi', '/recharge/':'recharge', '/checkin':'checkin',
                 '/star-day':'star-day', '/monthly-coupon':'monthly-coupon', '/coupons':'coupons',
-                '/member-benefits':'member-benefits'}.items():
+                '/member-benefits':'member-benefits', '/net-age':'net-age'}.items():
             if features is not None and not features.enabled(feature_id):
                 counts[path] = 0
                 if feature_id == 'coupons':
                     reminders = {'accounts': {}, 'total': 0}
                 if feature_id == 'member-benefits':
                     member_counts = {}
+                if feature_id == 'net-age':
+                    net_age_counts = {}
         with platforms.lock:
             for entry in platforms.platforms.values():
                 if entry['stopped'] or features is not None and not features.enabled(entry['id']) or not entry['controller'].metadata().get('active'):
@@ -100,5 +106,5 @@ def register_navigation_status(app, accounts, sources, platforms):
                     counts[entry['home']] = count
                     if entry['navigation'] == 'checkin':
                         counts['/checkin'] += count
-        return jsonify(counts=counts, coupon_reminders=reminders, member_benefit_counts=member_counts,
+        return jsonify(counts=counts, coupon_reminders=reminders, member_benefit_counts=member_counts, net_age_counts=net_age_counts,
                        checked_at=now.isoformat())

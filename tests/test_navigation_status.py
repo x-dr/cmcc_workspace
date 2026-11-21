@@ -143,6 +143,22 @@ class NavigationCountTests(unittest.TestCase):
         self.assertEqual(result['counts']['/member-benefits'],0)
         self.assertEqual(result['member_benefit_counts'],{})
 
+    def test_net_age_navigation_counts_only_logged_in_accounts_and_hides_when_disabled(self):
+        app=Flask('net-age-counts')
+        available_counts=Mock(return_value={'a':2})
+        app.extensions['net_age']=SimpleNamespace(available_counts=available_counts)
+        platforms=SimpleNamespace(lock=RLock(),platforms={})
+        register_navigation_status(app,lambda:ACCOUNTS,{},platforms)
+        client=app.test_client()
+        result=client.get('/api/navigation/issues').json
+        self.assertEqual(result['counts']['/net-age'],2)
+        self.assertEqual(result['net_age_counts'],{'a':2})
+        available_counts.assert_called_once_with({'a'})
+        app.extensions['feature_control']=SimpleNamespace(enabled=lambda name: name!='net-age')
+        result=client.get('/api/navigation/issues').json
+        self.assertEqual(result['counts']['/net-age'],0)
+        self.assertEqual(result['net_age_counts'],{})
+
 
 if __name__ == '__main__':
     unittest.main()

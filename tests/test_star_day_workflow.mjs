@@ -12,13 +12,15 @@ class Element {
   reset(){}
   showModal(){this.open=true;}
   close(){this.open=false;}
+  scrollIntoView(options){this.scrollOptions=options;}
   click(){if(!this.disabled)return this.handlers.click?.();}
 }
 const walk=(node,label)=>node.textContent===label?node:node.children.map(n=>walk(n,label)).find(Boolean);
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function fixture(){
+async function fixture({readProducts,submitClaim,mobile=false}={}){
   const elements=new Map(),calls=[],timers=[],get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   get('star-filter').value='all';
+  get('reservation-close').closest=()=>get('star-reservation');
   const accounts=[
     {id:'a',name:'未领取',phone_masked:'138****0001',status:'active',state:'ready',today_state:'signed',month_claimed:false,history:[]},
     {id:'b',name:'备用',phone_masked:'138****0002',status:'active',state:'ready',today_state:'signed',month_claimed:false,history:[]},
@@ -33,6 +35,8 @@ async function fixture(){
     if(selector==='#star-account-options input:not(:disabled)')return options.filter(b=>!b.disabled);
     if(selector==='#star-account-options input:checked')return options.filter(b=>b.checked);
     if(selector==='#star-offsets input')return get('star-offsets').children.map(w=>w.children[0].children[0]);
+    if(selector==='.star-dialog-error')return [get('reservation-error')];
+    if(selector==='[data-star-close]')return [get('reservation-close')];
     return [];
   };
   const fetch=async(url,options)=>{
@@ -41,8 +45,11 @@ async function fixture(){
     else if(url==='/api/star-day/open')result={message:'前台检查已安排'};
     else if(url==='/api/star-day/login/sms')result={sent:true,retry_after:60,message:'验证码已发送'};
     else if(url==='/api/star-day/login/submit'){model.accounts.find(a=>a.id===body.login_id).state='ready';result={message:'短信登录成功'};}
-    else if(url==='/api/star-day/products'){model.products=products;result={products};}
-    else if(url==='/api/star-day/claim')result={id:'manual',message:'已安排立即领取'};
+    else if(url.split('?')[0]==='/api/star-day/products'){
+      result={products:readProducts?await readProducts(products,options.signal,url):products};
+      if(!url.includes('?'))model.products=result.products;
+    }
+    else if(url==='/api/star-day/claim')result=submitClaim?await submitClaim():{id:'manual',message:'已安排立即领取'};
     else if(url==='/api/star-day/jobs')result={id:'new-future',message:'预约已保存'};
     else if(url==='/api/star-day/jobs/stop'){model.jobs=model.jobs.filter(j=>j.id!==body.id);result={message:'任务已停止并移除'};}
     else if(url==='/api/star-day/recheck')result={message:'重新认证已安排'};
@@ -52,8 +59,8 @@ async function fixture(){
     return {ok:true,json:async()=>structuredClone(result)};
   };
   vm.runInNewContext(fs.readFileSync(new URL('../static/star-day.js',import.meta.url),'utf8'),{
-    document:{getElementById:get,createElement:tag=>new Element(tag),querySelectorAll:all,querySelector:()=>null,hidden:false},
-    window:{addEventListener(){}},fetch,Date,setInterval(fn,ms){timers.push({fn,ms});},
+    document:{getElementById:get,createElement:tag=>new Element(tag),querySelectorAll:all,querySelector:selector=>selector==='dialog[open] .star-dialog-error'&&get('star-reservation').open?get('reservation-error'):null,hidden:false},
+    window:{addEventListener(){},matchMedia:()=>({matches:mobile})},fetch,Date,AbortController,setInterval(fn,ms){timers.push({fn,ms});},
   });
   await flush();return {get,calls,all,accounts,jobs,timers};
 }
@@ -67,9 +74,62 @@ test('unclaimed account opens immediate picker with only that account selected a
   assert.equal(get('star-reservation-timing').disabled,true);
   assert.doesNotMatch(fs.readFileSync(new URL('../templates/star_day.html',import.meta.url),'utf8'),/id="star-at"/);
   assert.deepEqual(all('#star-account-options input:checked').map(b=>b.value),['a']);
-  assert.equal(calls.filter(c=>c.url==='/api/star-day/products').length,1);
+  assert.equal(calls.filter(c=>c.url==='/api/star-day/products?login_id=a').length,1);
   assert.equal(calls.some(c=>c.body&&c.url!=='/api/star-day/open'),false);
   assert.equal(walk(get('star-accounts').children[2],'立即领取'),undefined);
+});
+
+test('a cold tap shows the picker immediately, and loads products with the tapped account',async()=>{
+  let finish;
+  const {get,calls}=await fixture({readProducts:products=>new Promise(resolve=>{finish=()=>resolve(products);})});
+  walk(get('star-accounts').children[1],'立即领取').click();
+  assert.equal(get('star-reservation').open,true);
+  assert.match(get('star-product-name').textContent,/正在读取官方权益/);
+  assert.equal(get('star-reservation-submit').disabled,true);
+  assert.equal(calls.at(-1).url,'/api/star-day/products?login_id=b');
+  finish();await flush();
+  assert.equal(get('star-claim-product').value,'1:123');
+  assert.equal(get('star-reservation-submit').disabled,false);
+});
+
+test('a rejected catalog read is visible in the picker and cannot be submitted',async()=>{
+  const {get,calls}=await fixture({readProducts:async()=>{throw new Error('活动凭据尚未就绪');}});
+  walk(get('star-accounts').children[1],'立即领取').click();await flush();
+  assert.equal(get('star-reservation').open,true);
+  assert.equal(get('reservation-error').hidden,false);
+  assert.equal(get('reservation-error').textContent,'活动凭据尚未就绪');
+  assert.equal(get('reservation-error').scrollOptions.block,'center');
+  assert.equal(get('star-reservation-submit').disabled,true);
+  assert.equal(calls.some(c=>c.url==='/api/star-day/claim'),false);
+});
+
+test('the user can dismiss the picker during catalog loading without sending a claim',async()=>{
+  let pendingSignal;
+  const {get,calls}=await fixture({readProducts:(_,signal)=>new Promise((resolve,reject)=>{
+    pendingSignal=signal;
+    signal.addEventListener('abort',()=>reject(signal.reason),{once:true});
+  })});
+  walk(get('star-accounts').children[0],'立即领取').click();
+  get('reservation-close').click();await flush();
+  assert.equal(pendingSignal.aborted,true);
+  assert.equal(get('star-reservation').open,false);
+  assert.equal(get('reservation-error').hidden,true);
+  assert.equal(calls.some(c=>c.url==='/api/star-day/claim'),false);
+});
+
+test('mobile confirmation gives immediate progress and brings the scheduled result into view',async()=>{
+  let finish;
+  const {get,calls}=await fixture({mobile:true,submitClaim:()=>new Promise(resolve=>{finish=()=>resolve({message:'已安排立即领取'});})});
+  walk(get('star-accounts').children[0],'立即领取').click();await flush();
+  const submit=()=>get('star-reservation-form').handlers.submit({preventDefault(){}});
+  submit();submit();
+  assert.equal(get('star-reservation-submit').disabled,true);
+  assert.equal(get('star-reservation-submit').textContent,'正在提交…');
+  assert.equal(calls.filter(c=>c.url==='/api/star-day/claim').length,1);
+  finish();await flush();
+  assert.equal(get('star-reservation').open,false);
+  assert.equal(get('star-feedback').textContent,'已安排立即领取');
+  assert.equal(get('star-feedback').scrollOptions.block,'center');
 });
 
 test('immediate submission contains chosen benefit and selected account without timing or burst values',async()=>{
@@ -102,10 +162,22 @@ test('product row supports immediate batch claim even when displayed stock is so
   assert.equal(calls.some(c=>c.url==='/api/star-day/calibrate'),false);
 });
 
+test('account claim loads its own catalog without replacing the general product list',async()=>{
+  const {get,calls}=await fixture({readProducts:(products,_signal,url)=>url.endsWith('=b')?[products[1]]:products});
+  get('star-products-refresh').click();await flush();
+  walk(get('star-accounts').children[1],'立即领取').click();await flush();
+  assert.ok(calls.some(call=>call.url==='/api/star-day/products?login_id=b'));
+  assert.deepEqual(get('star-claim-product').children.map(option=>option.value),['2:456']);
+  assert.equal(get('star-products').children.length,2);
+  get('star-reservation-form').handlers.submit({preventDefault(){}});await flush();
+  assert.deepEqual(calls.find(call=>call.url==='/api/star-day/claim').body,{product_id:'456',phase:2,login_ids:['b']});
+});
+
 test('reservation after immediate mode restores timing controls and original offset workflow',async()=>{
   const {get,calls}=await fixture();
   walk(get('star-accounts').children[0],'立即领取').click();await flush();
-  get('star-reservation').close();walk(get('star-products').children[0],'预约抢购').click();
+  get('star-reservation').close();get('star-products-refresh').click();await flush();
+  walk(get('star-products').children[0],'预约抢购').click();
   assert.equal(get('star-reservation-title').textContent,'配置每月权益领取');
   assert.equal(get('star-reservation-timing').hidden,false);assert.equal(get('star-reservation-timing').disabled,false);
   assert.equal(get('star-product-choice').hidden,true);

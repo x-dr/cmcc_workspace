@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock
 from curl_cffi import requests
 
-from checkin_client import CheckinClient, CheckinError, ENTRY, FLASH_PRODUCT, PreparedFlash, _official_url
+from checkin_client import CheckinClient, CheckinError, ENTRY, FLASH_PRODUCT, PreparedFlash
 from recharge.cmcc import SHANGHAI
 
 
@@ -40,7 +40,7 @@ class ProtocolSession:
         return Response(text='var loginPath="/appTokenLogin?sid=fake";')
 
     def post(self, url, *, json, **kwargs):
-        self.calls.append(('POST', url, json))
+        self.calls.append(('POST', url, json, kwargs.get('headers', {})))
         if '/qwhdsso/appTokenLogin' in url:
             return Response({'code': 'SUCCESS', 'data': {'url': ENTRY}})
         if kwargs.get('headers', {}).get('login-check') != '1':
@@ -134,6 +134,7 @@ class CheckinProtocolTests(unittest.TestCase):
         self.assertEqual(result['month_count'], 1)
         self.assertEqual(len(self.mutations(session)), 1)
         self.assertEqual(self.mutations(session)[0][2], {'date': '20261029'})
+        self.assertNotIn('Priority', self.mutations(session)[0][3])
         self.assertNotIn('/do/mark', self.mutations(session)[0][1])
 
     def test_submission_callback_runs_immediately_before_real_write(self):
@@ -177,6 +178,7 @@ class CheckinProtocolTests(unittest.TestCase):
         result = self.client(session).flash(FLASH_PRODUCT)
         self.assertEqual(result['state'], 'success')
         self.assertEqual(self.mutations(session)[0][2], {'secId': '123', 'prizeId': 456})
+        self.assertEqual(self.mutations(session)[0][3].get('Priority'), 'u=0, i')
         result = self.client(session).flash(FLASH_PRODUCT)
         self.assertFalse(result['submitted'])
         self.assertEqual(len(self.mutations(session)), 1)
@@ -232,8 +234,34 @@ class CheckinProtocolTests(unittest.TestCase):
         self.assertEqual(self.mutations(session), [])
 
     def test_refuses_cross_origin_sso_redirect(self):
-        with self.assertRaises(CheckinError):
-            _official_url('https://other.example/collect')
+        session = ProtocolSession()
+        session.get = Mock(return_value=Response(status=302, headers={
+            'location': 'https://other.example/private-path?sid=private-ticket',
+        }))
+        with self.assertRaises(CheckinError) as raised:
+            self.client(session).inspect()
+        self.assertEqual(raised.exception.code, 'SSO_REDIRECT')
+        message = str(raised.exception)
+        self.assertIn('活动入口 HTTP 302', message)
+        self.assertIn('other.example', message)
+        self.assertNotIn('private-', message)
+        session.get.assert_called_once_with(ENTRY, timeout=(10, 20), allow_redirects=False)
+        self.assertEqual(session.calls, [])
+
+    def test_records_blocked_app_callback_without_leaking_userinfo(self):
+        session = ProtocolSession()
+        session.post = Mock(return_value=Response({'code': 'SUCCESS', 'data': {
+            'url': 'https://private-user@wx.10086.cn/private-path?sid=private-ticket',
+        }}))
+        with self.assertRaises(CheckinError) as raised:
+            self.client(session).inspect()
+        self.assertEqual(raised.exception.code, 'SSO_REDIRECT')
+        message = str(raised.exception)
+        self.assertIn('APP 换票回调', message)
+        self.assertIn('地址含用户信息', message)
+        self.assertNotIn('private-', message)
+        self.assertEqual([call[1] for call in session.calls], [ENTRY])
+        session.post.assert_called_once()
 
     def test_unknown_product_is_rejected_before_network(self):
         session = ProtocolSession()
@@ -301,22 +329,50 @@ class PreparedFlashTests(unittest.TestCase):
                                    worker_session_factory=worker)
         self.settings = {'burst_count': 40, 'burst_interval': 0.05, 'burst_workers': 3}
 
-    def test_burst_reuses_one_sso_but_leases_independent_warmed_sessions(self):
-        result = self.client.flash(FLASH_PRODUCT, burst=self.settings)
-        self.assertEqual((result['state'], result['attempt_count']), ('success', 1))
+    def test_burst_reuses_one_sso_and_prepares_a_session_for_each_timer(self):
+        settings = {**self.settings, 'burst_interval': 0.01}
+        result = self.client.flash(FLASH_PRODUCT, burst=settings)
+        self.assertEqual((result['state'], result['attempt_count']), ('success', 40))
         sso_calls = [c for c in self.primary.calls if '/qwhdsso/appTokenLogin' in c[1]]
         self.assertEqual(len(sso_calls), 1)
-        self.assertEqual(len(self.workers), 3)
+        self.assertEqual(len(self.workers), 40)
         mutations = []
-        for worker in self.workers:
+        for index, worker in enumerate(self.workers):
             self.assertEqual(worker.cookies['HLWHD_SESSION_TOKEN'], 'fake-activity-session')
             self.assertEqual(worker.headers['Referer'], ENTRY)
-            self.assertTrue(worker.calls[0][1].endswith('/info/commonInfo'))
+            warmup = [c for c in worker.calls if c[1].endswith('/info/commonInfo')]
+            self.assertEqual(len(warmup), int(index < 3))
             mutations.extend(c for c in worker.calls if c[1].endswith('/redeem'))
             worker.close.assert_called_once_with()
-        self.assertEqual([c[2] for c in mutations], [{'secId': '123', 'prizeId': 456}])
+        self.assertEqual(len(mutations), 40)
+        self.assertTrue(all(c[3].get('Priority') == 'u=0, i' for c in mutations))
+        self.assertEqual({tuple(sorted(c[2].items())) for c in mutations},
+                         {(('prizeId', 456), ('secId', '123'))})
+        self.assertEqual([attempt['index'] for attempt in result['attempts']], list(range(1, 41)))
+        self.assertFalse(any(attempt['followup'] for attempt in result['attempts']))
         self.assertNotIn('cookie', str(result))
         self.assertNotIn('fake-activity-session', str(result))
+
+    def test_reserved_burst_sends_exact_count_after_zone_end_with_zero_stock(self):
+        self.primary.start_time = NOW-3600000
+        self.primary.end_time = NOW-60000
+        self.primary.stock = 0
+        target = datetime.fromtimestamp(NOW/1000, SHANGHAI)
+        result = self.client.flash(FLASH_PRODUCT,
+            burst={'burst_count': 20, 'burst_interval': 0.01, 'burst_workers': 4},
+            target_at=target, start_monotonic=time.monotonic())
+        mutations = [call for worker in self.workers for call in worker.calls
+                     if call[1].endswith('/redeem')]
+        self.assertEqual((result['state'], result['attempt_count']), ('success', 20))
+        self.assertEqual(len(mutations), 20)
+        self.assertEqual([attempt['index'] for attempt in result['attempts']], list(range(1, 21)))
+
+    def test_confirmed_claim_skips_reserved_burst_before_warming_workers(self):
+        self.primary.flash_title, self.primary.prize_name = '每周秒杀', '1元话费券'
+        self.primary.claimed = True
+        result = self.client.flash(FLASH_PRODUCT, burst=self.settings)
+        self.assertEqual((result['flash_state'], result['attempt_count']), ('already_claimed', 0))
+        self.assertEqual(self.workers, [])
 
     def test_preparation_waits_for_noon_even_if_official_zone_started_earlier(self):
         target = datetime.fromtimestamp(NOW/1000, SHANGHAI)
@@ -337,6 +393,70 @@ class PreparedFlashTests(unittest.TestCase):
         self.assertGreaterEqual(prepared.start_monotonic, began+30)
         self.assertTrue(all(len(worker.calls) == 1 for worker in self.workers))
 
+    def test_preparation_uses_scheduler_shared_monotonic_deadline(self):
+        target = datetime.fromtimestamp(NOW/1000, SHANGHAI)
+        zone = {'id': 123, 'startTime': NOW-3600000, 'endTime': NOW+3600000,
+                'prize': {'id': 456, 'status': '0', 'leaveStock': 1}}
+        self.client._inspect = Mock(return_value=({'server_time': target.isoformat(),
+                'today_state': 'signed', 'flash_state': 'available'}, [zone]))
+        prepared = PreparedFlash(self.client, self.primary, copy.deepcopy(SNAPSHOT))
+        self.addCleanup(prepared.close)
+        shared = time.monotonic()+10
+        prepared.prepare(2, target, start_monotonic=shared)
+        self.assertEqual(prepared.start_monotonic, shared)
+
+    def test_one_limited_prewarm_connection_does_not_reduce_request_count(self):
+        post = self.client._post
+
+        def limit_second_connection(session, path, *args, **kwargs):
+            if len(self.workers) == 2 and session is self.workers[-1] and path == 'info/commonInfo':
+                return {'code': 'FAIL', 'status': 'GWT_LIMITED'}
+            return post(session, path, *args, **kwargs)
+
+        self.client._post = limit_second_connection
+        prepared = PreparedFlash(self.client, self.primary, copy.deepcopy(SNAPSHOT))
+        try:
+            prepared.prepare(3, None)
+            self.assertTrue(prepared.ready)
+            self.assertEqual(prepared.worker_count, 2)
+            self.assertEqual(len(self.workers), 3)
+            self.assertFalse(any(c[1].endswith('/redeem') for w in self.workers for c in w.calls))
+        finally:
+            prepared.close()
+        for worker in self.workers:
+            worker.close.assert_called_once_with()
+
+    def test_ten_limited_replies_still_send_exactly_ten_without_followup(self):
+        def limited_worker():
+            session = ProtocolSession()
+            original_post = session.post
+
+            def post(url, *, json, **kwargs):
+                if url.endswith('/markSeckill/redeem'):
+                    session.calls.append(('POST', url, json, kwargs.get('headers', {})))
+                    return Response({'code': 'FAIL', 'status': 'GWT_LIMITED'})
+                return original_post(url, json=json, **kwargs)
+
+            session.post = post
+            session.close = Mock()
+            self.workers.append(session)
+            return session
+
+        self.client.worker_session_factory = limited_worker
+        before_submit = Mock()
+        result = self.client.flash(FLASH_PRODUCT,
+            burst={'burst_count': 10, 'burst_interval': 0.01, 'burst_workers': 3},
+            before_submit=before_submit)
+
+        mutations = [c for worker in self.workers for c in worker.calls if c[1].endswith('/redeem')]
+        self.assertEqual((result['state'], result['attempt_count']), ('skipped', 10))
+        self.assertEqual(len(mutations), 10)
+        self.assertEqual([attempt['index'] for attempt in result['attempts']], list(range(1, 11)))
+        self.assertTrue(all(attempt['code'] == 'GWT_LIMITED' for attempt in result['attempts']))
+        self.assertFalse(any(attempt['followup'] for attempt in result['attempts']))
+        before_submit.assert_called()
+        self.assertEqual(before_submit.call_count, 10)
+
     def test_changed_credentials_after_warmup_prevent_all_redeems(self):
         from checkin_flash import run_flash_burst
         prepared = PreparedFlash(self.client, self.primary, copy.deepcopy(SNAPSHOT))
@@ -354,10 +474,15 @@ class PreparedFlashTests(unittest.TestCase):
         prepared.prepare(1, None)
         worker = self.workers[0]
         for code, state in [('NET_ERROR', 'retryable'), ('NOT_TIME_IN', 'retryable'),
+                            ('TRAFFIC_LIMITED', 'retryable'), ('GWT_LIMITED', 'retryable'),
                             ('PRIZE_NO_STOCK', 'terminal'), ('PRIZE_LIMIT_MONTH', 'terminal'),
                             ('UNKNOWN', 'terminal')]:
             worker.post = Mock(return_value=Response({'code': 'FAIL', 'status': code}))
-            self.assertEqual(prepared.send(before_submit=Mock())['state'], state)
+            result = prepared.send(before_submit=Mock())
+            self.assertEqual(result['state'], state)
+            if code in {'TRAFFIC_LIMITED', 'GWT_LIMITED'}:
+                self.assertEqual(result['message'], '当前参与用户太多啦，请稍后重试')
+                self.assertNotIn(code, result['message'])
         worker.post = Mock(return_value=Response({'code': 'FAIL', 'status': 'RISK_VERIFY'}))
         with self.assertRaises(CheckinError) as raised:
             prepared.send(before_submit=Mock())

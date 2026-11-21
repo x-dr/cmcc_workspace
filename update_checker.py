@@ -18,6 +18,8 @@ from runtime_paths import FROZEN, VERSION
 REPOSITORY = 'https://github.com/x-dr/cmcc_workspace'
 RELEASES_URL = REPOSITORY + '/releases'
 API_URL = 'https://api.github.com/repos/x-dr/cmcc_workspace/releases/latest'
+ANDROID_API_URL = API_URL.removesuffix('/latest') + '?per_page=30'
+ANDROID_ASSET = 'LingxiWorkspace-{version}-Android-arm64.apk'
 CHECK_INTERVAL = 6 * 3600
 MANUAL_INTERVAL = 60
 
@@ -27,14 +29,37 @@ def version_numbers(value):
     return tuple(int(part) for part in match.groups()) if match else None
 
 
-def fetch_release(etag):
+def _latest_android_release(payload):
+    if not isinstance(payload, list):
+        raise ValueError('安卓发布列表格式无效')
+    candidates = []
+    for item in payload:
+        if not isinstance(item, dict) or item.get('draft') or item.get('prerelease'):
+            continue
+        tag = item.get('tag_name')
+        version = version_numbers(tag) if isinstance(tag, str) else None
+        assets = item.get('assets')
+        if version is None or not isinstance(assets, list):
+            continue
+        name = ANDROID_ASSET.format(version=tag.removeprefix('v').split('+')[0])
+        if any(isinstance(asset, dict) and asset.get('name') == name and asset.get('state', 'uploaded') == 'uploaded'
+               for asset in assets):
+            candidates.append((version, item))
+    return max(candidates, key=lambda candidate: candidate[0])[1] if candidates else None
+
+
+def fetch_release(etag, *, platform=None):
     headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'LingxiWorkspace/'+VERSION,
                'X-GitHub-Api-Version': '2022-11-28'}
     if etag:
         headers['If-None-Match'] = etag
     try:
-        with urlopen(Request(API_URL, headers=headers), timeout=10) as response:
-            return json.load(response), response.headers.get('ETag', '')
+        url = ANDROID_API_URL if platform == 'android' else API_URL
+        with urlopen(Request(url, headers=headers), timeout=10) as response:
+            payload = json.load(response)
+            if platform == 'android':
+                payload = _latest_android_release(payload)
+            return payload, response.headers.get('ETag', '')
     except HTTPError as error:
         if error.code == 304:
             return False, etag
@@ -48,12 +73,14 @@ class UpdateChecker:
         self.storage, self.current_version = storage, current_version
         self.platform = platform or ('android' if os.environ.get('LINGXI_ANDROID') == '1'
                                     else 'windows' if FROZEN and os.name == 'nt' else 'source')
-        self.fetcher, self.now = fetcher or fetch_release, now or time.time
+        self.feed = 'android' if self.platform == 'android' else 'latest'
+        self.fetcher = fetcher or (lambda etag: fetch_release(etag, platform=self.platform))
+        self.now = now or time.time
         self.lock, self.quit, self.thread = RLock(), Event(), None
         self.checking = False
         self.data = (storage.load_update_check() if storage is not None else None) or {}
-        if self.data.get('repository') != REPOSITORY:
-            self.data = {'repository': REPOSITORY, 'release': None, 'etag': '', 'checked_at': 0,
+        if self.data.get('repository') != REPOSITORY or self.data.get('feed', 'latest') != self.feed:
+            self.data = {'repository': REPOSITORY, 'feed': self.feed, 'release': None, 'etag': '', 'checked_at': 0,
                          'last_attempt_at': 0, 'next_check_at': 0, 'error': ''}
             self._save()
 
@@ -107,7 +134,7 @@ class UpdateChecker:
                 root = REPOSITORY + '/releases/download/' + quote(tag, safe='') + '/'
                 names = {f'LingxiWorkspace-{version}-Windows-x64.exe': 'windows',
                          f'LingxiWorkspace-{version}-Windows-x64.zip': 'windows-zip',
-                         f'LingxiWorkspace-{version}-Android-arm64.apk': 'android'}
+                         ANDROID_ASSET.format(version=version): 'android'}
                 assets = [{'name': item['name'], 'platform': names[item['name']], 'url': root+quote(item['name'], safe=''),
                            'size': item.get('size', 0)} for item in raw_assets if item.get('name') in names]
                 release = {'version': version, 'tag': tag, 'title': str(payload.get('name') or tag)[:200],

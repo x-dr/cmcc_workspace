@@ -135,6 +135,36 @@ class AutomaticWednesdayTests(unittest.TestCase):
         self.sync();self.assertFalse(job['enabled'])
         self.now+=timedelta(seconds=61);self.sync();self.assertTrue(job['enabled'])
 
+    def test_device_auth_failure_releases_automatic_worker_and_allows_manual_retry(self):
+        self.now = self.now.replace(hour=9, minute=0, second=0)
+        self.scheduler.daily.configure({'enabled': False, 'time': '00:01'})
+        self.sync()
+        account = self.account()
+        client = account.client
+        official_claim = client.claim
+        client.claim = Mock(side_effect=ActivityError('官方设备认证未完成', 'DEVICE_AUTH_FAILED', 503, retryable=True))
+        self.execute()
+
+        job = self.scheduler.jobs[account.id]
+        client.claim.assert_called_once()
+        self.assertEqual((job['state'], job['submissions'], job['failure_code']), ('failed', 0, 'DEVICE_AUTH_FAILED'))
+        self.assertFalse(self.scheduler.busy(account.id))
+        self.now += timedelta(minutes=5)
+        self.pool[0]['credential_revision'] += 1
+        with patch('recharge.scheduler.threading.Thread') as thread:
+            self.scheduler.tick()
+            thread.assert_not_called()
+            response = self.http.post('/api/schedules/run-now', headers=self.headers,
+                                      json={'account_ids': [account.id]})
+            self.assertEqual(response.json['started'], [account.id], response.json)
+            thread.assert_called_once()
+            _, target, cancellation = thread.call_args.kwargs['args']
+
+        client.claim = official_claim
+        self.scheduler._worker(account.id, target, cancellation)
+        self.assertEqual((job['state'], job['submissions']), ('success', 1))
+        self.assertEqual(job['next_run_at'], '2026-11-04T08:00:00+08:00')
+
     def test_twenty_attempt_cap_is_not_reset_by_background_account_refresh(self):
         self.sync();self.now=self.now.replace(hour=8,minute=0,second=0)
         self.account().client.failures=30;self.execute()

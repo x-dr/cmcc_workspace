@@ -28,13 +28,18 @@ import * as M from './task-model.js';
     $('wed-checkin-plan').textContent=state.settings.enabled?`每日 ${state.settings.time} 起自动打卡 · 全部有效账号`:'自动打卡已关闭';
     const rows=scope.map(login=>{
       const record=state.records[login.id]||{},p=record.progress||{},current=p.date===day,month=p.month===day.slice(0,7),working=workingIds.has(login.id);
+      const failedToday=record.state==='failed'&&record.attempt_date===day;
+      const relevantProgress=current||month&&(p.received||p.action==='closed');
       const tr=node('tr'),progress=node('td'),task=node('td'),prize=node('td'),result=node('td','wed-result'),actions=node('td');
-      progress.append(badge(working?'处理中':current?p.status:'今日待查询',record.state==='failed'?'orange':p.today_signed&&current?'green':'blue'),node('small','',`${month?p.streak||0:0} / 7 天`));
+      progress.append(badge(working?'处理中':current?p.status:'今日待查询',failedToday?'orange':p.today_signed&&current?'green':'blue'),node('small','',`${month?p.streak||0:0} / 7 天`));
       task.append(node('span','',month?p.task||'—':'待查询'));if(p.broken&&month)task.append(node('small','','已断签，重新从第1天累计'));
       prize.append(badge(month&&p.received?'本月已领取':month&&p.action==='claim'?'待领取':month&&p.rd_status===5?'本月已抢光':'待满7天',month&&p.received?'green':''));
       if(p.prize&&month)prize.append(node('small','',[p.prize.shortName,p.prize.name,p.prize.subTitle].filter(Boolean).join(' · ')));
-      result.append(node('span','',record.message||'到点后自动核对当日进度'),node('small','',time(p.queried_at)));
-      if(record.state==='failed')result.append(node('small','',record.blocked?'当天自动检查已停止，处理后可主动查询':record.attempts>=5?'今日失败已达5次，明日再检查':`失败 ${record.attempts}/5 次，5分钟后再核对`));
+      const resultMessage=failedToday?record.message:relevantProgress&&(p.message||record.state!=='failed'&&record.message);
+      const resultTime=failedToday?record.attempted_at:p.queried_at;
+      result.append(node('span','',resultMessage||'今日尚未查询'));
+      if(resultTime)result.append(node('small','',`${failedToday?'失败时间':'上次查询'} ${time(resultTime)}`));
+      if(failedToday)result.append(node('small','',record.blocked?'当天自动检查已停止，处理后可主动查询':record.attempts>=5?'今日失败已达5次，明日再检查':`失败 ${record.attempts}/5 次，5分钟后再核对`));
       const wrap=node('div','wed-row-actions'),query=button('查询进度',()=>runCheckins([login]),'secondary');query.disabled=working||login.status!=='active';wrap.append(query);
       if(canSubmitCheckin(record,day)){
         const run=button(current&&p.action==='claim'?'领取8折券':'立即签到',()=>runCheckins([login],true),'secondary');
@@ -100,7 +105,8 @@ import * as M from './task-model.js';
   function weeklyClaimAccounts(){
     return accountScope().flatMap(login=>{
       const account=linked(login.id);
-      return login.status==='active'&&account&&!busy.has(login.id)&&!M.active.has(data.jobs[account.id]?.state)?[account.id]:[];
+      return login.status==='active'&&account&&!busy.has(login.id)&&!signBusy.has(login.id)
+        &&!data.checkin?.active?.includes(login.id)&&!M.active.has(data.jobs[account.id]?.state)?[account.id]:[];
     });
   }
   function week(){const date=new Date(Date.parse(data.server_time||new Date().toISOString())+8*3600000);date.setUTCDate(date.getUTCDate()+(3-date.getUTCDay()+7)%7);return date.toISOString().slice(0,10);}
@@ -119,11 +125,21 @@ import * as M from './task-model.js';
     const clock=new Date(Date.parse(data.server_time)+8*3600000);
     const open=clock.getUTCDay()===3&&clock.getUTCHours()>=8;
     const claim=$('wed-claim-now');
-    claim.disabled=mutation||!open||!weeklyClaimAccounts().length;
-    claim.title=open?(selectedLogin?'启动当前账号本场抢券':'启动范围内有效账号本场抢券'):'北京时间周三 08:00 后可手动抢券';
+    const hasTargets=weeklyClaimAccounts().length>0;
+    const claimHint=!open?'北京时间周三 08:00 后可手动抢券':
+      mutation?'正在处理请求':!hasTargets?'当前范围内没有空闲的已登录账号':
+        selectedLogin?'启动当前账号本场抢券':'启动范围内有效账号本场抢券';
+    claim.disabled=mutation||!open||!hasTargets;
+    claim.title=claimHint;
+    $('wed-opening').textContent=open&&claim.disabled?claimHint:'每周三 · 07:55 准备 → 08:00 领取';
     const rows=accountScope().map(login=>{
       const tr=node('tr'),account=linked(login.id),job=data.jobs[account?.id],state=account?.activity||{},active=M.active.has(job?.state);
-      const status=node('td');status.append(login.status!=='active'?badge('需要重新登录','orange'):active?badge(M.labels[job.state],'blue'):state.state_label?badge(state.state_label,state.prize?'green':'blue'):badge('待周三准备','blue'));
+      const status=node('td');
+      if(login.status!=='active')status.append(badge('需要重新登录','orange'));
+      else if(active)status.append(badge(M.labels[job.state],'blue'));
+      else if(job?.state==='failed'&&job.failure_code==='DEVICE_AUTH_FAILED')status.append(badge('设备认证未完成','orange'));
+      else if(state.state_label)status.append(badge(state.state_label,state.prize?'green':'blue'));
+      else status.append(badge('待周三准备','blue'));
       if(state.server_time)status.append(node('small','','最近查询 '+time(state.server_time)));
       const plan=node('td');plan.append(login.status==='active'?badge(job&&skipped(job)?'本周已停止':'自动参与',job&&skipped(job)?'':'green'):badge('登录恢复后自动纳入','orange'));
       if(job?.next_run_at)plan.append(node('small','',time(job.next_run_at)));else if(login.status==='active')plan.append(node('small','','周三 07:55 准备 → 08:00 领取'));

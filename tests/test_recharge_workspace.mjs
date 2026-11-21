@@ -115,6 +115,18 @@ test('manual status queries stay disabled while automatic preparation is armed',
   assert.equal(calls.length,1);
 });
 
+test('device authentication failures show their cause and release the manual claim button',async()=>{
+  const {get,jobs}=await fixture({running:true,serverTime:'2026-10-28T09:00:00+08:00'});
+  assert.equal(get('wed-claim-now').disabled,true);
+  assert.match(get('wed-opening').textContent,/没有空闲的已登录账号/);
+
+  Object.assign(jobs['activity-a'],{state:'failed',enabled:false,failure_code:'DEVICE_AUTH_FAILED',
+    message:'官方设备认证未完成，请稍后主动刷新'});
+  await get('wed-refresh').click();
+  assert.equal(get('wed-claim-now').disabled,false);
+  assert.ok(find(get('wed-status-rows'),'设备认证未完成'));
+});
+
 test('weekly claim button starts the selected accounts only during the open round',async()=>{
   const closed=await fixture();
   assert.equal(closed.get('wed-claim-now').disabled,true);
@@ -154,4 +166,20 @@ test('the toolbar sign-in follows the selected account',async()=>{
   await new Promise(resolve=>setImmediate(resolve));
   await get('wed-checkin-sign').click();
   assert.deepEqual(calls.filter(call=>call.body?.submit).map(call=>call.body),[{login_id:'a',submit:true}]);
+});
+
+test('only today’s check-in failure shows the daily retry limit',async()=>{
+  const failure={state:'failed',attempts:5,message:'官方活动登录响应格式无效'};
+  const checkin={settings:{enabled:true,time:'00:01'},records:{
+    a:{...failure,attempt_date:'2026-10-26',attempted_at:'2026-10-26T00:23:00+08:00'},
+    b:{...failure,attempt_date:'2026-10-25'},
+  },active:[]};
+  const {get}=await fixture({checkin});
+  const [today,previous]=get('wed-checkin-rows').children;
+  assert.ok(find(today,failure.message));
+  assert.ok(find(today,'今日失败已达5次，明日再检查'));
+  assert.match(today.children[4].children[1].textContent,/^失败时间.*00:23:00$/);
+  assert.ok(find(previous,'今日尚未查询'));
+  assert.equal(find(previous,failure.message),null);
+  assert.equal(find(previous,'今日失败已达5次，明日再检查'),null);
 });

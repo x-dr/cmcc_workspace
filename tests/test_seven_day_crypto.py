@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from activities.seven_day import crypto
+from activities import coc_wheel as crypto
 
 
 class SevenDayCryptoTests(unittest.TestCase):

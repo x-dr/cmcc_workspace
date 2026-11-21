@@ -228,6 +228,17 @@ class ActivityClient:
             return response
         raise ActivityError('活动 APP 登录跳转次数过多', 'APP_SSO_REDIRECT')
 
+    @staticmethod
+    def _sso_json(response, stage):
+        message = f'官方{stage}响应格式无效，请稍后查询。'
+        try:
+            data = response.json()
+        except ValueError as error:
+            raise ActivityError(message, 'APP_SSO_FORMAT', 502, retryable=True) from error
+        if not isinstance(data, dict):
+            raise ActivityError(message, 'APP_SSO_FORMAT', 502, retryable=True)
+        return data
+
     def _app_credential_snapshot(self):
         if self.app_credentials_provider is None:
             latest = self.app_material
@@ -307,13 +318,11 @@ class ActivityClient:
                 'userCheckId': format(int(phone), 'x'),
                 'carrierOperator': str(profile.get('carrierOperator') or '002'),
                 'appVersionCode': '12.5.6', 'took': 0,
-            }, headers={'Referer': page.url, 'Content-Type': 'application/json;charset=UTF-8'},
+            }, headers={'Referer': str(page.url), 'Content-Type': 'application/json;charset=UTF-8'},
                 timeout=(10, 25), allow_redirects=False)
             if result.status_code != 200:
                 raise ActivityError(f'APP 活动认证 HTTP {result.status_code}', 'APP_SSO_HTTP', 502, retryable=True)
-            data = result.json()
-            if not isinstance(data, dict):
-                raise ActivityError('活动认证响应格式无效，请稍后重试', 'APP_SSO_FORMAT', 502, retryable=True)
+            data = self._sso_json(result, '活动登录')
             if data.get('code') != 'SUCCESS':
                 # A business SSO failure is not evidence that the APP's main
                 # credentials expired. Preserve them for the authoritative
@@ -330,9 +339,7 @@ class ActivityClient:
                                      timeout=(10, 20), allow_redirects=False)
             if response.status_code != 200:
                 raise ActivityError('无法验证活动 APP 会话', 'APP_SSO_HTTP', 502, retryable=True)
-            identity = response.json()
-            if not isinstance(identity, dict):
-                raise ActivityError('活动身份响应格式无效，请稍后重试', 'APP_SSO_FORMAT', 502, retryable=True)
+            identity = self._sso_json(response, '活动身份核对')
             if str(identity.get('code')) != '0':
                 raise ActivityError('活动会话暂未建立，请稍后重试', 'APP_SSO_FAILED', 502, retryable=True)
             self._check_current_credentials(cookie, phone, profile, input_revision)

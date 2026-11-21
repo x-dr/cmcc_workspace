@@ -19,7 +19,8 @@ LOGIN_REQUIRED_MESSAGE = '共享账号需要恢复登录，恢复后自动加入
 LOGIN_RECOVERED_MESSAGE = '共享账号已登录，已自动加入周三领取；每周三 07:55 准备，08:00 开始领取。'
 # These responses require a user action; retries must not attempt to get past them.
 ACTION_REQUIRED = {'GOTO_LOGIN', 'LOGIN_REQUIRED', 'BROWSER_MISSING', 'BROWSER_CLOSED',
-                   '160030', '160019', 'CSRF_REJECTED', 'APP_LOGIN_REQUIRED', 'APP_SSO_REJECTED'}
+                   '160030', '160019', 'CSRF_REJECTED', 'APP_LOGIN_REQUIRED', 'APP_SSO_REJECTED',
+                   'DEVICE_AUTH_FAILED'}
 
 
 def retry_policy(data):
@@ -104,8 +105,9 @@ class ClaimScheduler:
                 retry_at = parse_server_time(job.get('retry_at'))
                 revision_changed = (job.get('attempt_revision') != item.get('credential_revision', 0)
                                     or job.get('attempt_status') != item['status'])
-                blocked = (job.get('failed_week') == week and not revision_changed
-                           and (not job.get('retryable') or retry_at is not None and current < retry_at))
+                blocked = (job.get('failed_week') == week and
+                           (job.get('failure_code') == 'DEVICE_AUTH_FAILED' or not revision_changed
+                            and (not job.get('retryable') or retry_at is not None and current < retry_at)))
                 if blocked:
                     continue
                 login_recovered = bool(job.get('blocked_login'))
@@ -190,23 +192,25 @@ class ClaimScheduler:
                 account = self.manager.get(account_id)
                 login = shared.get(account.pool_login_id)
                 job = self.jobs.get(account_id)
+                device_failed = (job and job['state'] == 'failed' and job.get('failed_week') == week
+                                 and job.get('failure_code') == 'DEVICE_AUTH_FAILED')
                 if not login or login['status'] != 'active' or not job:
                     message = '请先恢复共享账号登录'
                 elif self.busy(account_id):
                     message = '任务正在处理'
                 elif job.get('skip_week') == week:
                     message = '本周任务已停止'
-                elif job.get('completed_week') == week and job['submissions'] >= job['max_attempts']:
+                elif (job.get('completed_week') == week or device_failed) and job['submissions'] >= job['max_attempts']:
                     message = '本场提交额度已用完'
                 elif job.get('completed_week') == week and job['state'] != 'exhausted' and not (
                         job['history'] and job['history'][-1]['message'].startswith(f'已达 {job["max_attempts"]} 轮上限：')):
                     message = '本场已有领取结果'
-                elif not job['enabled']:
+                elif not job['enabled'] and not device_failed:
                     message = job['message']
                 else:
                     if job.get('completed_week') == week:
                         job.pop('completed_week')
-                    self._update(account_id, state='preparing', next_run_at=target.isoformat(),
+                    self._update(account_id, state='preparing', enabled=True, next_run_at=target.isoformat(),
                                  message='手动抢券已启动，正在核对本场资格')
                     self._start_worker(account_id, target)
                     started.append(account_id)

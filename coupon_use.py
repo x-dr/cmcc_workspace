@@ -64,15 +64,25 @@ def _decimal_text(number):
 
 def _choices(rule, amount_rule=None):
     sale_type = str(rule.get('saleType'))
-    if sale_type not in ('7', '10', '15'):
+    if sale_type not in ('7', '8', '10', '15'):
         raise CouponUseError('此券优惠规则尚未接入，请在 APP 使用此券。', 'RULE_UNSUPPORTED', 409)
+    discount_cap = None
+    raw_cap = rule.get('capDiscount')
+    if sale_type == '8' and raw_cap is not None:
+        try:
+            cap_in_cents = Decimal('0' if raw_cap == '' else str(raw_cap))
+        except InvalidOperation as error:
+            raise CouponUseError('官方折扣上限格式无效，本次没有生成订单。', 'RULE_MISSING', 409) from error
+        if not cap_in_cents.is_finite() or cap_in_cents < 0:
+            raise CouponUseError('官方折扣上限格式无效，本次没有生成订单。', 'RULE_MISSING', 409)
+        discount_cap = cap_in_cents / 100
     bands = []
     for text in str(rule.get('saleCode') or '').split(','):
         match = re.fullmatch(r'(\d+(?:\.\d+)?)~(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)', text.strip())
         if not match:
             raise CouponUseError('官方充值规则无法解析，本次没有生成订单。', 'RULE_MISSING', 409)
         band = tuple(Decimal(part) for part in match.groups())
-        if band[0] > band[1]:
+        if band[0] > band[1] or (sale_type == '8' and band[2] > 1):
             raise CouponUseError('官方充值规则区间无效，本次没有生成订单。', 'RULE_MISSING', 409)
         bands.append(band)
     limits = amount_rule or {}
@@ -83,6 +93,9 @@ def _choices(rule, amount_rule=None):
     candidates = {Decimal(value) for value in (20, 30, 50, 100, 200, 500, 1000)}
     candidates.update(max(low, minimum).quantize(Decimal('.01'), rounding=ROUND_CEILING)
                       for low, high, _ in bands if max(low, minimum) <= min(high, maximum))
+    if sale_type == '8':
+        candidates.update(min(high, maximum).quantize(Decimal('.01'), rounding=ROUND_FLOOR)
+                          for low, high, _ in bands if max(low, minimum) <= min(high, maximum))
     rounding = {'1': ROUND_CEILING, '2': ROUND_FLOOR}.get(str(rule.get('discountFormat') or ''), ROUND_HALF_UP)
     choices = []
     for original in sorted(candidates):
@@ -91,7 +104,17 @@ def _choices(rule, amount_rule=None):
         eligible = [discount for low, high, discount in bands if low <= original <= high]
         if eligible:
             discount = eligible[-1]
-            payment = (original if sale_type == '7' else original-discount).quantize(Decimal('.01'), rounding=rounding)
+            if sale_type == '7':
+                payment = original
+            elif sale_type == '8':
+                payment = original * discount
+                if discount_cap is not None:
+                    payment = max(payment, original - discount_cap)
+                # The recharge page rounds the cent value to five decimal places first.
+                payment = payment.quantize(Decimal('.0000001'), rounding=ROUND_HALF_UP)
+            else:
+                payment = original - discount
+            payment = payment.quantize(Decimal('.01'), rounding=rounding)
             credit = (original+discount if sale_type == '7' else original).quantize(Decimal('.01'), rounding=rounding)
             if payment <= 0:
                 continue
@@ -104,9 +127,14 @@ def _choices(rule, amount_rule=None):
                             'label': f'充值 {_decimal_text(original)} 元 · 实付 {_decimal_text(payment)} 元，到账 {_decimal_text(credit)} 元'})
     if not choices:
         raise CouponUseError('此券当前没有可用的充值档位，请前往 APP 查看。', 'NO_CHOICE', 409)
-    best = min(choices, key=lambda choice: (
-        -(Decimal(str(choice['credit']))-Decimal(choice['amount']))/Decimal(choice['amount']),
-        choice['amount']))
+    if sale_type == '8':
+        return [choices[-1]]
+
+    def value_rank(choice):
+        payment = Decimal(choice['payment'])
+        return -(Decimal(choice['credit']) - payment) / payment, payment
+
+    best = min(choices, key=value_rank)
     return [best]
 
 
@@ -801,7 +829,7 @@ class CouponUseManager:
                     raise CouponUseError('官方卡券信息已变化，请重新打开用券窗口确认。', 'COUPON_CHANGED', 409)
                 rule = self._rule(operation, row)
                 if any(rule.get(key) != operation.rule.get(key) for key in
-                       ('operateId', 'saleType', 'saleCode', 'discountFormat', 'pcardType', 'pCardType')):
+                       ('operateId', 'saleType', 'saleCode', 'discountFormat', 'capDiscount', 'pcardType', 'pCardType')):
                     raise CouponUseError('官方用券规则已变化，请重新打开用券窗口确认。', 'RULE_CHANGED', 409)
             user = operation.user
             verified_sms = (operation.serial, sms_code)

@@ -20,6 +20,7 @@ STATIC_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.
 APPLY_PATHS = {CAPTCHA_ROOT+'/api/'+name for name in ('a', 'a2', 'a3', 'p1')}
 VERIFY_PATHS = {CAPTCHA_ROOT+'/api/'+name for name in ('v1', 'v2', 'v3')}
 DEVICE_PATH = 'mgt/decision-engine/udid/c1'
+LOGIN_DEVICE_PATH = 'mgt/decision-engine/udid/m1'
 WALLET_RESOURCES = {
     'wallet/index-private-web_a54cc0c.js': 'https://touch.10086.cn/i/mobile/component/index-private-web_a54cc0c.js',
     'wallet/udid/c1': 'https://touch.10086.cn/i/mobile/tfk/mgt/decision-engine/udid/c1',
@@ -40,6 +41,7 @@ def register_coupon_captcha(app, *, session_factory=None):
         is_static = (resource.startswith(CAPTCHA_ROOT+'/zw-captcha/')
                      and PurePosixPath(resource).suffix.lower() in STATIC_EXTENSIONS)
         allowed_ids = {LOGIN_CAPTCHA_APP_ID} if login else app_ids
+        is_device = resource == DEVICE_PATH or (login and resource == LOGIN_DEVICE_PATH)
         is_logo = (resource.startswith(CAPTCHA_ROOT+'/api/logo/')
                    and resource.rsplit('/', 1)[-1] in allowed_ids)
         if login and resource in WALLET_RESOURCES:
@@ -52,7 +54,7 @@ def register_coupon_captcha(app, *, session_factory=None):
             methods = {'GET'}
         elif resource in VERIFY_PATHS:
             methods = {'POST'}
-        elif resource == DEVICE_PATH:
+        elif is_device:
             methods = {'GET', 'POST'}
         else:
             return jsonify(error='不支持的验证资源。'), 404
@@ -65,7 +67,7 @@ def register_coupon_captcha(app, *, session_factory=None):
         for key in ('Referer', 'Content-Type', 'Accept'):
             if key in request.headers:
                 headers[key] = request.headers[key]
-        if resource in (DEVICE_PATH, 'wallet/udid/c1'):
+        if is_device or resource == 'wallet/udid/c1':
             for key in ('appId', 'param'):
                 if key in request.headers:
                     headers[key] = request.headers[key]

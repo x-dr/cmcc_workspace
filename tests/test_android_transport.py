@@ -75,3 +75,53 @@ class AndroidTransportTests(unittest.TestCase):
             insecure_cookie = dict(json.loads(self.calls[-1][2])).get('cookie', '')
             self.assertNotIn('stc-rrt-token', insecure_cookie)
             self.assertIn('_zw_kvani5r=sdk-lid', insecure_cookie)
+
+    def test_wednesday_progress_recovers_app_session_through_android_transport(self):
+        from credential_cache import CredentialCache
+        from recharge.checkin import ContinuousCheckin
+        from recharge.cmcc import ActivityClient, BASE, ENTRY
+
+        origin = 'https://wx.10086.cn'
+        login_page = origin + '/qwhdsso/login?sid=fixture'
+        login_api = origin + '/qwhdsso/appTokenLogin?sid=fixture'
+        finish = origin + '/qwhdsso/redirect?sid=fixture'
+        phone = '13800000000'
+        progress = {'isTodaySign': '1', 'signTimes': 1, 'rdStatus': 4, 'taskList': []}
+        replies = iter([
+            ('GET', ENTRY, 302, [['Location', login_page]], b''),
+            ('GET', login_page, 200, [], b"var loginPath = '/appTokenLogin?sid=fixture';"),
+            ('POST', login_api, 200, [], {'code': 'SUCCESS', 'data': {'url': finish}}),
+            ('GET', finish, 200, [['Set-Cookie', 'wed_session=fixture; Secure; Path=/']], b''),
+            ('GET', BASE + '_pub/rec_login', 200, [], {'code': '0', 'data': {'phone': phone}}),
+            ('POST', BASE + 'querySignActInfo', 200, [], {'code': '0', 'data': progress}),
+            ('POST', BASE + 'querySignActInfo', 200, [], {'code': '0', 'data': progress}),
+        ])
+
+        def request(*args):
+            self.calls.append(args)
+            method, url, status, headers, body = next(replies)
+            self.assertEqual(args[:2], (method, url))
+            content = body if isinstance(body, bytes) else json.dumps(body).encode()
+            chunks = iter([content] if content else [])
+            return SimpleNamespace(status=lambda:status, headers=lambda:json.dumps(headers),
+                                   read=lambda:next(chunks, None), close=lambda:None)
+
+        native = SimpleNamespace(request=request)
+        login = {'id': 'fixture', 'phone': phone, 'cookie': 'JSESSIONID=fixture', 'profile': {},
+                 'status': 'active', 'credential_revision': 1}
+        with patch.object(self.module, 'jclass', lambda name:OSError if name == 'java.io.IOException' else native), \
+             patch('recharge.cmcc.requests', self.module.requests):
+            activity = ActivityClient(app_credentials_provider=lambda:login, credential_cache=CredentialCache())
+            self.addCleanup(lambda:activity.http.close())
+            account = SimpleNamespace(id='fixture-activity', client=activity)
+            scheduler = ContinuousCheckin(lambda:[login], lambda _:account)
+            self.addCleanup(scheduler.pool.shutdown)
+
+            self.assertTrue(scheduler.run(login['id'])['today_signed'])
+            self.assertTrue(scheduler.run(login['id'])['today_signed'])
+
+        post_headers = dict(json.loads(self.calls[2][2]))
+        self.assertEqual(post_headers['referer'], login_page)
+        self.assertIn('wed_session=fixture', dict(json.loads(self.calls[5][2]))['cookie'])
+        self.assertEqual(sum(call[1] == login_api for call in self.calls), 1)
+        self.assertEqual(len(self.calls), 7)

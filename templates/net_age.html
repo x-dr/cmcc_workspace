@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>网龄 · 本地工具台</title>
+  <link rel="stylesheet" href="/static/portal.css"><link rel="stylesheet" href="/static/workspace.css">
+  <link rel="stylesheet" href="/static/coupons.css"><link rel="stylesheet" href="/static/net-age.css">
+  <link rel="stylesheet" href="/static/mobile.css?v=mobile-1">
+  {% include 'theme_head.html' %}
+  <script src="/static/account-window.js" defer></script><script src="/static/workspace.js" defer></script>
+  <script src="/static/mobile.js?v=mobile-1" defer></script><script src="/static/net-age.js" defer></script>
+</head>
+<body class="workspace-app" data-workspace="net-age">
+<main class="portal-shell net-age-shell">
+  <header class="coupons-heading net-age-heading">
+    <h1>网龄</h1><button type="button" id="age-refresh" class="secondary">刷新权益</button>
+  </header>
+  <section class="coupons-account-panel" aria-labelledby="age-accounts-title">
+    <div class="coupons-account-heading">
+      <h2 id="age-accounts-title">共享账号 <span id="age-account-count">—</span></h2>
+      <button type="button" class="portal-quiet" data-account-window>账号管理</button>
+    </div>
+    <p id="age-account-empty" class="net-age-muted" role="status">正在读取共享账号…</p>
+    <div id="age-accounts" class="coupons-accounts" role="group" aria-label="网龄使用账号"></div>
+  </section>
+  <section class="coupons-panel" aria-labelledby="age-activities-title">
+    <div class="net-age-activity-heading">
+      <h2 id="age-activities-title">网龄权益</h2>
+      <div class="net-age-current">
+        <div><strong id="age-current-account">尚未选择账号</strong><p id="age-profile" class="net-age-muted" hidden></p></div>
+        <button id="age-relogin" type="button" class="secondary" data-account-window hidden>重新登录</button>
+      </div>
+    </div>
+    <p id="age-feedback" class="net-age-feedback net-age-query-feedback" role="status" hidden></p>
+    <ul class="net-age-list">
+      {% for key, name in [('seven','七日打卡分百万'),('flow','月月领权益'),('member','热门会员任选 1'),('ai','AI 权益 4 选 2'),('birthday','网龄生日礼'),('surprise','网龄惊喜礼')] %}
+      <li data-age-group="{{ key }}">
+        <div><h3>{{ name }}</h3><p data-age-detail></p></div>
+        <span class="net-age-status" data-age-status>待查询</span>
+        <div class="net-age-actions" data-age-actions></div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</main>
+<dialog id="age-confirm" aria-labelledby="age-confirm-title">
+  <form id="age-confirm-form">
+    <h2 id="age-confirm-title"></h2><p id="age-confirm-account"></p>
+    <div id="age-options" class="net-age-options"></div>
+    <div id="age-verification" class="net-age-verification" hidden>
+      <div id="age-slider-section" hidden>
+        <button id="age-challenge" type="button" class="secondary">获取官方滑块</button>
+        <div id="age-slider-panel" hidden>
+          <div class="net-age-puzzle"><img id="age-slider-ground" alt="官方验证图"><img id="age-slider-piece" alt="滑块"></div>
+          <label for="age-slider-position">移动滑块，对准缺口</label>
+          <input id="age-slider-position" type="range" min="0" max="300" value="0">
+          <button id="age-slider-submit" type="button" class="secondary">提交滑块</button>
+        </div>
+      </div>
+      <label for="age-code">短信验证码</label>
+      <div class="net-age-code"><input id="age-code" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code">
+        <button id="age-send-sms" type="button" class="secondary">获取验证码</button></div>
+    </div>
+    <p id="age-confirm-note" class="net-age-feedback" role="status" hidden></p>
+    <div class="net-age-dialog-actions">
+      <button id="age-cancel" type="button" class="secondary">取消</button>
+      <button id="age-submit" type="submit" class="primary">确认</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

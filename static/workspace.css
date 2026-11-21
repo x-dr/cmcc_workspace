@@ -54,7 +54,7 @@ body.workspace-app {display:block;margin:0;padding:var(--ws-topbar) 0 0 var(--ws
 .workspace-issue-badge,.workspace-coupon-badge{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:22px;height:20px;margin-left:auto;padding:0 6px;border:0;border-radius:4px;background:#f6768b24;color:#ffadb9;font:500 11px/1 Inter,"Segoe UI","Microsoft YaHei",sans-serif;font-variant-numeric:tabular-nums;letter-spacing:0}
 .workspace-issue-badge[hidden],.workspace-coupon-badge[hidden]{display:none!important}
 .workspace-nav-item.active .workspace-issue-badge,.workspace-subnav-item.active .workspace-issue-badge{background:#f6768b24;color:#ffadb9}
-.workspace-nav-group[open]>summary>.workspace-issue-badge{display:none}
+.workspace-nav-group[open]>summary>:is(.workspace-issue-badge,.workspace-coupon-badge){display:none}
 .workspace-app .workspace-nav-item[data-issue-key]{column-gap:8px}
 .workspace-nav-item>span:not(.workspace-issue-badge):not(.workspace-coupon-badge){min-width:0;overflow:hidden;text-overflow:ellipsis}
 .workspace-nav-group{margin:0}
@@ -81,7 +81,7 @@ body.workspace-app {display:block;margin:0;padding:var(--ws-topbar) 0 0 var(--ws
 .workspace-nav-footer small{overflow-wrap:anywhere}.workspace-service-dot{height:6px;width:6px;border-radius:50%;background:#3bce9c;box-shadow:0 0 0 4px #37b58b10}.workspace-private{display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:24px;margin-left:auto;font-size:11px;line-height:16px;color:var(--nav-muted);border:1px solid #edf3fb20;border-radius:4px;padding:2px 4px}
 
 /* Sidebar craft pass follows unslop by Damir Sokolovsky (@heydamir), CC BY 4.0. */
-.workspace-nav-group>summary>.workspace-issue-badge{order:2;margin-left:0}
+.workspace-nav-group>summary>:is(.workspace-issue-badge,.workspace-coupon-badge){order:2;margin-left:0}
 .workspace-nav #workspace-activity-navigation{display:grid;gap:4px}
 .workspace-nav #workspace-activity-navigation:empty{display:none}
 .workspace-nav>.workspace-nav-item+.workspace-nav-item{margin-top:4px}

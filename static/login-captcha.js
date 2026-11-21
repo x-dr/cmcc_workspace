@@ -18,7 +18,7 @@
     if(!window._zw?.Captcha){fail();return;}
     window._zw.Captcha(verify,{
       appId:'02aecbb71abe2113e42a602056797e09',language:'cn',isSaaS:false,showVoice:false,
-      apiServer:root+'decision-captcha',constIDServer:root+'decision-engine/udid/c1',
+      apiServer:root+'decision-captcha',constIDServer:root+'decision-engine/udid/m1',
       constID_js:root+'decision-captcha/zw-captcha/libs/const-id.js',
       ua_js:root+'decision-captcha/zw-captcha/libs/greenseer.js',
       path:root+'decision-captcha/zw-captcha/',style:'embed',width:Math.min(300,document.documentElement.clientWidth-16),

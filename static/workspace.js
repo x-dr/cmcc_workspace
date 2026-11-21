@@ -24,31 +24,43 @@
   const pages = [
     ['home','/','工作台'], ['chat','/lingxi','即时对话'],
     ['lingxi-tasks','/lingxi/tasks','定时发送'],
-    ['star-day','/star-day','星动日'],
+    ['star-day','/star-day','星动日'], ['net-age','/net-age','网龄'],
     ['recharge','/recharge/','周三充值日'],
     ['recharge-tasks','/recharge/?tab=tasks','周三充值日'],
     ['checkin','/checkin','签到有礼'],
     ['monthly-coupon','/monthly-coupon','每月话费券'],
     ['coupons','/coupons','我的卡券'],
-    ['mobile-rights','/mobile-rights','移动权益'],
-    ['member-benefits','/member-benefits','会员权益'],
+    ['mobile-rights','/mobile-rights','权益领取'],
+    ['member-benefits','/member-benefits','会员领取'],
     ['bills','/information','信息查询'],
     ['platforms','/platforms','平台管理'],
   ];
-  const groups = [
-    {title:'灵犀对话',icon:'chat',keys:['chat','lingxi-tasks']},
-  ];
+  const chatGroup = {title:'灵犀对话',icon:'chat',keys:['chat','lingxi-tasks'],issueKey:'/lingxi/tasks'};
+  const rightsGroup = {title:'我的权益',icon:'rights',keys:['mobile-rights','member-benefits'],issueKey:'/member-benefits'};
   const checkinChannelTitle = {'/checkin/wechat':'微信渠道签到'}[location.pathname];
-  const currentGroup = groups.find(group => group.keys.includes(page)) || (checkinChannelTitle ? {title:'签到有礼'} : null);
+  const currentGroup = [chatGroup, rightsGroup].find(group => group.keys.includes(page)) || (checkinChannelTitle ? {title:'签到有礼'} : null);
+
+  function renderGroup(group, expanded = false) {
+    const links = pages.filter(([key]) => group.keys.includes(key)).map(([key, url, label]) => {
+      const active = page === key;
+      return `<a href="${url}" class="workspace-subnav-item${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${label}</a>`;
+    }).join('');
+    return `<details class="workspace-nav-group${currentGroup === group ? ' contains-current' : ''}"${expanded ? ' open' : ''}>
+      <summary data-issue-key="${group.issueKey}">${icon(group.icon)}<span>${group.title}</span><svg class="workspace-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></summary>
+      <div class="workspace-subnav">${links}</div></details>`;
+  }
+
   const nav = document.createElement('aside'); nav.className = 'workspace-nav'; nav.id = 'workspace-navigation';
-  nav.innerHTML = `<a class="workspace-brand" href="/" aria-label="本地工具台首页"><span class="workspace-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#84beff" d="m16 2 13 7-13 7L3 9Z"/><path fill="#398cff" d="m3 12 11 6v13L3 25Z"/><path fill="#b9daff" d="m18 18 11-6v13l-11 6Z"/></svg></span><span>本地工具台<small>移动账号与任务</small></span></a>
+  nav.innerHTML = `<a class="workspace-brand" href="/" aria-label="本地工具台首页"><span class="workspace-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#84beff" d="m16 2 13 7-13 7L3 9Z"/><path fill="#398cff" d="m3 12 11 6v13L3 25Z"/><path fill="#b9daff" d="m18 18 11-6v13l-11 6Z"/></svg></span><span>本地工具台<small>账号与任务</small></span></a>
     <div class="workspace-nav-label">工作空间</div><nav aria-label="主导航"><a href="/" class="workspace-nav-item${page === 'home' ? ' active' : ''}"${page === 'home' ? ' aria-current="page"' : ''}>${icon('grid')}<span>工作台</span></a>
-    ${groups.map(group => `<details class="workspace-nav-group${currentGroup === group ? ' contains-current' : ''}"><summary>${icon(group.icon)}<span>${group.title}</span><svg class="workspace-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></summary><div class="workspace-subnav">${pages.filter(item => group.keys.includes(item[0])).map(([key,url,label]) => `<a href="${url}" class="workspace-subnav-item${page === key ? ' active' : ''}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</div></details>${group.keys.includes('chat') ? `<a href="/star-day" class="workspace-nav-item${page === 'star-day' ? ' active' : ''}"${page === 'star-day' ? ' aria-current="page"' : ''}>${icon('star')}<span>星动日</span></a><a href="/recharge/" class="workspace-nav-item${['recharge','recharge-tasks'].includes(page) ? ' active' : ''}"${['recharge','recharge-tasks'].includes(page) ? ' aria-current="page"' : ''}>${icon('recharge')}<span>周三充值日</span></a>` : ''}`).join('')}
+    ${renderGroup(chatGroup)}
+    <a href="/star-day" class="workspace-nav-item${page === 'star-day' ? ' active' : ''}"${page === 'star-day' ? ' aria-current="page"' : ''}>${icon('star')}<span>星动日</span></a>
+    <a href="/net-age" class="workspace-nav-item${page === 'net-age' ? ' active' : ''}"${page === 'net-age' ? ' aria-current="page"' : ''}>${icon('calendar')}<span>网龄</span></a>
+    <a href="/recharge/" class="workspace-nav-item${['recharge','recharge-tasks'].includes(page) ? ' active' : ''}"${['recharge','recharge-tasks'].includes(page) ? ' aria-current="page"' : ''}>${icon('recharge')}<span>周三充值日</span></a>
     <a href="/checkin" class="workspace-nav-item${page === 'checkin' ? ' active' : ''}"${page === 'checkin' ? ' aria-current="page"' : ''}>${icon('checkin')}<span>签到有礼</span></a>
     <a href="/monthly-coupon" class="workspace-nav-item${page === 'monthly-coupon' ? ' active' : ''}"${page === 'monthly-coupon' ? ' aria-current="page"' : ''}>${icon('monthly')}<span>每月话费券</span></a>
     <a href="/coupons" class="workspace-nav-item${page === 'coupons' ? ' active' : ''}"${page === 'coupons' ? ' aria-current="page"' : ''}>${icon('wallet')}<span>我的卡券</span></a>
-    <a href="/mobile-rights" class="workspace-nav-item${page === 'mobile-rights' ? ' active' : ''}"${page === 'mobile-rights' ? ' aria-current="page"' : ''}>${icon('rights')}<span>移动权益</span></a>
-    <a href="/member-benefits" class="workspace-nav-item${page === 'member-benefits' ? ' active' : ''}"${page === 'member-benefits' ? ' aria-current="page"' : ''}>${icon('rights')}<span>会员权益</span></a>
+    ${renderGroup(rightsGroup, currentGroup === rightsGroup)}
     <a href="/information" class="workspace-nav-item${page === 'bills' ? ' active' : ''}"${page === 'bills' ? ' aria-current="page"' : ''}>${icon('information')}<span>信息查询</span></a>
     <div id="workspace-activity-navigation"></div></nav>
     <div class="workspace-nav-divider"></div><button type="button" class="workspace-nav-item${page === 'accounts' ? ' active' : ''}" data-account-window>${icon('users')}<span>账号管理</span></button>
@@ -100,7 +112,6 @@
   for (const link of nav.querySelectorAll('a.workspace-nav-item, a.workspace-subnav-item')) {
     link.dataset.issueKey = link.getAttribute('href');
   }
-  nav.querySelector('.workspace-nav-group > summary').dataset.issueKey = '/lingxi/tasks';
   nav.querySelector('button[data-account-window]').dataset.issueKey = 'accounts';
 
   const marker = nav.querySelector('#workspace-activity-navigation');

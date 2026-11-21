@@ -1,10 +1,11 @@
 from datetime import datetime
-from threading import Event, Lock, Timer
+from threading import Barrier, Event, Lock, Timer
 import time
 import unittest
+from unittest.mock import patch
 
 from checkin_client import CheckinError
-from checkin_flash import run_flash_burst
+from checkin_flash import CLOCK_URL, calibrate_flash_clock, run_flash_burst
 from recharge.cmcc import SHANGHAI
 
 
@@ -47,6 +48,28 @@ class Prepared:
 
 
 class FlashBurstTests(unittest.TestCase):
+    def test_clock_calibration_samples_once_and_uses_request_midpoints(self):
+        class Response:
+            headers = {'Date': 'Thu, 29 Oct 2026 04:00:00 GMT'}
+        class Session:
+            def __init__(self):
+                self.headers, self.calls, self.closed = {}, [], False
+            def options(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Response()
+            def close(self):
+                self.closed = True
+        session = Session()
+        server = datetime(2026, 10, 29, 12, 0, 0, tzinfo=SHANGHAI).timestamp()
+        timeline = [value for _ in range(30) for value in (server+0.1, server+0.2)]
+        with patch('checkin_flash.time.time', side_effect=timeline):
+            result = calibrate_flash_clock(session_factory=lambda: session)
+        self.assertEqual((result['state'], result['samples']), ('ready', 30))
+        self.assertAlmostEqual(result['offset_ms'], 350, places=3)
+        self.assertEqual(len(session.calls), 30)
+        self.assertTrue(all(call[0] == CLOCK_URL for call in session.calls))
+        self.assertTrue(session.closed)
+
     def run_burst(self, prepared, *, count=6, workers=2, interval=0.01, cancelled=None):
         return run_flash_burst(prepared, {'burst_count': count, 'burst_workers': workers,
                 'burst_interval': interval}, lambda: None, cancelled or (lambda: False), followup_seconds=0.04)
@@ -109,6 +132,25 @@ class FlashBurstTests(unittest.TestCase):
         result = self.run_burst(prepared, workers=1)
         self.assertEqual((result['state'], result['attempt_count'], prepared.checks), ('success', 1, 1))
 
+    def test_gwt_limit_does_not_reduce_explicit_fixed_request_count(self):
+        def limited(_):
+            return {'state': 'terminal', 'code': 'GWT_LIMITED', 'message': '官方未允许领取（GWT_LIMITED）'}
+
+        for confirmed in (False, True):
+            with self.subTest(confirmed=confirmed):
+                prepared = Prepared(limited)
+                prepared.confirmed = confirmed
+                result = run_flash_burst(prepared,
+                    {'burst_count': 10, 'burst_workers': 10, 'burst_interval': 0.01},
+                    lambda: None, lambda: False, followup_seconds=None, stop_on_result=False)
+                self.assertEqual(result['attempt_count'], 10)
+                self.assertEqual(prepared.checks, 1)
+                self.assertEqual([attempt['index'] for attempt in result['attempts']], list(range(1, 11)))
+                self.assertTrue(all(attempt['code'] == 'GWT_LIMITED' for attempt in result['attempts']))
+                self.assertFalse(any(attempt['followup'] for attempt in result['attempts']))
+                self.assertEqual(result['state'], 'success' if confirmed else 'skipped')
+                self.assertIn('官方状态确认已领取' if confirmed else '官方状态未显示已领取', result['message'])
+
     def test_stop_during_wait_sends_nothing(self):
         prepared, stop = Prepared(wait=0.2), Event()
         timer = Timer(0.03, stop.set)
@@ -117,6 +159,21 @@ class FlashBurstTests(unittest.TestCase):
         result = self.run_burst(prepared, cancelled=stop.is_set)
         self.assertEqual((result['state'], result['attempt_count']), ('stopped', 0))
 
+    def test_timers_do_not_wait_for_an_earlier_request_to_return(self):
+        ready = Barrier(4, timeout=2)
+
+        def reply(_index):
+            ready.wait()
+            return {'state': 'terminal', 'code': 'NOT_AVAILABLE', 'message': '暂不可领取'}
+
+        prepared = Prepared(reply, delay=0)
+        result = run_flash_burst(prepared,
+            {'burst_count': 4, 'burst_workers': 1, 'burst_interval': 0.05},
+            lambda: None, lambda: False, followup_seconds=None, stop_on_result=False, use_timers=True)
+        self.assertEqual(prepared.peak, 4)
+        self.assertEqual(result['attempt_count'], 4)
+        self.assertEqual([item['planned_offset_ms'] for item in result['attempts']], [0, 50, 100, 150])
+
     def test_official_end_prevents_remaining_requests(self):
         prepared = Prepared(delay=0.002, window=0.04)
         result = self.run_burst(prepared, count=30)
@@ -124,6 +181,15 @@ class FlashBurstTests(unittest.TestCase):
         self.assertLess(result['attempt_count'], 30)
         self.assertTrue(all(t < prepared.end_monotonic for t in prepared.starts))
         self.assertFalse(any(record['followup'] for record in result['attempts']))
+
+    def test_fixed_reservation_ignores_official_end_and_sends_every_request(self):
+        prepared = Prepared(wait=0.01, delay=0.002, window=0.01)
+        result = run_flash_burst(prepared,
+            {'burst_count': 20, 'burst_workers': 5, 'burst_interval': 0.001},
+            lambda: None, lambda: False, followup_seconds=None, stop_on_result=False)
+        self.assertEqual(result['attempt_count'], 20)
+        self.assertEqual([attempt['index'] for attempt in result['attempts']], list(range(1, 21)))
+        self.assertGreater(prepared.starts[-1], prepared.end_monotonic)
 
 
 if __name__ == '__main__':

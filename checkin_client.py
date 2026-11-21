@@ -1,7 +1,7 @@
 """APP SSO client for the official qwhdmark 31-day sign-in page.
 
-Protocol source: qwhdmark/static/js/index.1f703412.js and
-pages-qwhdmark-views-home-index.e83418db.js, observed 2026-10-29.
+Protocol source: qwhdmark/static/js/index.3bd4c264.js and
+pages-qwhdmark-views-home-index.dbfe4c1c.js, observed 2026-11-17.
 The legacy /do/mark activity is deliberately not used for the APP calendar.
 """
 from __future__ import annotations
@@ -36,7 +36,15 @@ RESULT_MESSAGES = {
     'PRIZE_NO_CONFIG': '签到成功，今天暂无配置奖品',
     'PRIZE_ISSUE_FAILED': '奖品发放暂未完成，请在 APP 核实',
     'NET_ERROR': '官方服务繁忙，本次没有自动重发',
+    'TRAFFIC_LIMITED': '当前参与用户太多啦，请稍后重试',
+    'GWT_LIMITED': '当前参与用户太多啦，请稍后重试',
 }
+FLASH_LIMIT_CODES = {'TRAFFIC_LIMITED', 'GWT_LIMITED'}
+CONTINUE_FLASH_CODES = {'NET_ERROR', 'NOT_TIME_IN'} | FLASH_LIMIT_CODES
+
+
+def _result_message(code, fallback):
+    return RESULT_MESSAGES.get(code, fallback+'（'+code[:60]+'）')
 
 
 class CheckinError(Exception):
@@ -45,18 +53,35 @@ class CheckinError(Exception):
         self.code, self.status, self.uncertain = code, status, uncertain
 
 
-def _official_url(value, base=ENTRY):
-    target = urljoin(base, value)
-    parts = urlsplit(target)
-    if parts.scheme != 'https' or parts.netloc != 'wx.10086.cn' or parts.username or parts.password:
-        raise CheckinError('活动认证返回了不支持的跳转地址', 'SSO_REDIRECT')
-    return target
+def _official_url(value, base=ENTRY, *, source='活动认证'):
+    if not value.strip():
+        raise CheckinError(f'{source}缺少跳转地址', 'SSO_REDIRECT')
+    try:
+        target = urljoin(base, value)
+        parts = urlsplit(target)
+    except ValueError:
+        raise CheckinError(f'{source}返回了格式无效的跳转地址', 'SSO_REDIRECT') from None
+    if parts.scheme == 'https' and parts.netloc == 'wx.10086.cn':
+        return target
+
+    host = parts.hostname or ''
+    safe_host = host if re.fullmatch(r'[a-z0-9.:-]{1,253}', host) else '无法识别'
+    if parts.scheme != 'https':
+        reason = '需要 HTTPS'
+    elif parts.username is not None or parts.password is not None:
+        reason = '地址含用户信息'
+    elif host != 'wx.10086.cn':
+        reason = '目标主机与活动域不一致'
+    else:
+        reason = '主机格式或端口与活动域不一致'
+    raise CheckinError(f'{source}返回了不支持的跳转地址（{reason}，目标主机 {safe_host}）', 'SSO_REDIRECT')
 
 
-def _data(response):
+def _data(response, *, stage=''):
     if response.get('code') != 'SUCCESS':
         code = str(response.get('status') or response.get('code') or 'UPSTREAM_FAILED')
-        raise CheckinError(RESULT_MESSAGES.get(code, '官方暂时未允许此操作（'+code[:60]+'）'), code)
+        message = _result_message(code, '官方暂时未允许此操作')
+        raise CheckinError(f'{stage} · {message}' if stage else message, code)
     return response.get('data')
 
 
@@ -110,17 +135,18 @@ class CheckinClient:
             raise CheckinError('共享账号凭据已更新，请重试以使用最新登录态', 'APP_CREDENTIALS_CHANGED', 409)
 
     @staticmethod
-    def _follow(client, url):
+    def _follow(client, url, *, source):
+        url = _official_url(url, source=source)
         for _ in range(10):
-            url = _official_url(url)
             response = client.get(url, timeout=(10, 20), allow_redirects=False)
             if response.status_code in {301, 302, 303, 307, 308}:
-                url = _official_url(response.headers.get('location', ''), url)
+                url = _official_url(response.headers.get('location', ''), url,
+                                    source=f'{source} HTTP {response.status_code}')
                 continue
             if response.status_code != 200:
                 raise CheckinError('签到活动入口 HTTP '+str(response.status_code), 'UPSTREAM_HTTP')
             return response
-        raise CheckinError('活动认证跳转次数过多', 'SSO_REDIRECT')
+        raise CheckinError(f'{source}跳转次数过多', 'SSO_REDIRECT')
 
     def _post(self, client, path, body=None, *, snapshot=None, before_submit=None):
         if path not in READ_PATHS | WRITE_PATHS:
@@ -130,10 +156,13 @@ class CheckinClient:
             self._current(snapshot)
             if before_submit is not None:
                 before_submit()
+        headers = {'Content-Type': 'application/json;charset=UTF-8',
+                   'x-requested-with': 'XMLHttpRequest', 'login-check': '1'}
+        if path == 'markSeckill/redeem':
+            headers['Priority'] = 'u=0, i'
         try:
             response = client.post(BASE+path, json=body or {},
-                                   headers={'Content-Type': 'application/json;charset=UTF-8',
-                                            'x-requested-with': 'XMLHttpRequest', 'login-check': '1'},
+                                   headers=headers,
                                    timeout=(10, 20), allow_redirects=False)
         except requests.RequestsError as error:
             raise CheckinError('请求中断，结果待核实；本次没有自动重发' if writing else '连接签到服务失败，请稍后重试',
@@ -158,7 +187,7 @@ class CheckinClient:
         return value
 
     def _authenticate(self, client, snapshot):
-        page = self._follow(client, ENTRY)
+        page = self._follow(client, ENTRY, source='活动入口')
         match = re.search(r"var\s+loginPath\s*=\s*['\"]([^'\"]+)['\"]", page.text)
         if not match or not match[1].startswith('/appTokenLogin?sid='):
             raise CheckinError('签到活动未返回 APP 登录入口', 'APP_SSO_ENTRY')
@@ -174,11 +203,12 @@ class CheckinClient:
         }, timeout=(10, 25), allow_redirects=False)
         if response.status_code != 200:
             raise CheckinError('APP 活动认证 HTTP '+str(response.status_code), 'APP_SSO_HTTP')
-        payload = _data(response.json())
+        payload = _data(response.json(), stage='APP 活动换票')
         if not isinstance(payload, dict) or not isinstance(payload.get('url'), str):
             raise CheckinError('APP 活动认证响应格式无效', 'APP_SSO_FORMAT')
-        self._follow(client, payload['url'])
-        identity = _data(self._post(client, 'user/info', {'appVersion': '12.5.6', 'miniVersion': ''}))
+        self._follow(client, payload['url'], source='APP 换票回调')
+        identity = _data(self._post(client, 'user/info', {'appVersion': '12.5.6', 'miniVersion': ''}),
+                         stage='活动账号核验')
         if not isinstance(identity, dict):
             raise CheckinError('签到活动身份响应格式无效', 'UPSTREAM_FORMAT')
         # The current H5 keeps `mobile` opaque and renders nickName as the
@@ -213,7 +243,7 @@ class CheckinClient:
             client.close()
 
     def _inspect(self, client):
-        common = _data(self._post(client, 'info/commonInfo'))
+        common = _data(self._post(client, 'info/commonInfo'), stage='活动配置查询')
         if not isinstance(common, dict):
             raise CheckinError('未取得官方签到配置', 'UPSTREAM_FORMAT')
         now = parse_server_time(common.get('sysTime'))
@@ -221,7 +251,7 @@ class CheckinClient:
             raise CheckinError('未取得官方服务器时间，本次未提交', 'SERVER_TIME_MISSING')
         if common.get('isMark31') not in (True, 1, '1'):
             raise CheckinError('当前账号未开放本页的每日签到活动', 'ACTIVITY_UNAVAILABLE', 409)
-        month = _data(self._post(client, 'mark31/markstatus'))
+        month = _data(self._post(client, 'mark31/markstatus'), stage='签到状态查询')
         if (not isinstance(month, dict) or not isinstance(month.get('markstatus'), list)
                 or not isinstance(month.get('userinfo'), dict)):
             raise CheckinError('未取得本月签到记录', 'UPSTREAM_FORMAT')
@@ -234,7 +264,7 @@ class CheckinClient:
         signed = str(day['status']) == '1'
         count = month['userinfo'].get('accumulateTimes')
         count = int(count) if count is not None else None
-        config = _data(self._post(client, 'markSeckill/secConfig'))
+        config = _data(self._post(client, 'markSeckill/secConfig'), stage='秒杀场次查询')
         flash_config = (config.get('secKillData') or {}) if isinstance(config, dict) else {}
         title = str(flash_config.get('mainTitle') or '')
         kind = 'weekly' if '每周秒杀' in title else 'monthly' if not title or '月末秒杀' in title else ''
@@ -325,9 +355,10 @@ class CheckinClient:
                     message = '签到成功，今日奖品未发放或已抢完'
                 return {**updated, 'state': 'signed', 'message': message, 'submitted': True}
             code = str(response.get('status') or response.get('code') or 'UNKNOWN')
-            return {**updated, 'state': 'failed', 'message': RESULT_MESSAGES.get(code, '官方尚未确认签到成功（'+code[:60]+'）'), 'submitted': True}
+            return {**updated, 'state': 'failed', 'message': _result_message(code, '官方尚未确认签到成功'), 'submitted': True}
 
-    def flash(self, product_id, *, before_submit=None, burst=None, cancelled=None, target_at=None, claimed_periods=None):
+    def flash(self, product_id, *, before_submit=None, burst=None, cancelled=None, target_at=None,
+              claimed_periods=None, start_monotonic=None):
         if product_id not in (FLASH_PRODUCT, LEGACY_FLASH_PRODUCT):
             raise CheckinError('请选择签到有礼的官方秒杀场次', 'INVALID_PRODUCT', 400)
         if burst is not None:
@@ -335,8 +366,11 @@ class CheckinClient:
             with self._session() as (client, snapshot):
                 prepared = PreparedFlash(self, client, snapshot)
                 try:
-                    prepared.prepare(burst['burst_workers'], target_at, claimed_periods)
-                    return run_flash_burst(prepared, burst, before_submit, cancelled or (lambda: False))
+                    count = burst['burst_count']
+                    prepared.prepare(min(burst['burst_workers'], count), target_at, claimed_periods,
+                                     start_monotonic, request_count=count)
+                    return run_flash_burst(prepared, burst, before_submit, cancelled or (lambda: False),
+                                           followup_seconds=None, stop_on_result=False, use_timers=True)
                 finally:
                     prepared.close()
         with self._session() as (client, snapshot):
@@ -356,15 +390,16 @@ class CheckinClient:
                         'flash_message': '秒杀领取成功，请在 APP 我的奖品中查看',
                         'message': '秒杀领取成功，请在 APP 我的奖品中查看', 'submitted': True}
             code = str(response.get('status') or response.get('code') or 'UNKNOWN')
-            return {**result, 'state': 'skipped', 'message': RESULT_MESSAGES.get(code, '官方未允许领取（'+code[:60]+'）'), 'submitted': True}
+            return {**result, 'state': 'skipped', 'message': _result_message(code, '官方未允许领取'), 'submitted': True}
 
 
 class PreparedFlash:
     def __init__(self, owner, client, snapshot):
         self.owner, self.client, self.snapshot = owner, client, snapshot
         self.ready, self.sessions, self.available = False, [], SimpleQueue()
+        self.worker_count = 0
 
-    def prepare(self, workers, target_at, claimed_periods=None):
+    def prepare(self, workers, target_at, claimed_periods=None, start_monotonic=None, *, request_count=None):
         self.result, zones = self.owner._inspect(self.client)
         now = datetime.fromisoformat(self.result['server_time'])
         _keep_flash_claim(self.result, claimed_periods)
@@ -374,36 +409,56 @@ class PreparedFlash:
         if self.result['flash_state'] == 'already_claimed':
             return
         target = target_at or now.replace(hour=12, minute=0, second=0, microsecond=0)
-        eligible = [zone for zone in zones if _in_window(zone, target)
-                    and _zone_time(zone['endTime']) > now
-                    and str(zone['prize'].get('status')) != '1'
-                    and float(zone['prize'].get('leaveStock') or 0) > 0]
-        if not eligible:
-            self.result['flash_message'] = '本场未开放或奖品已抢完，本轮未发送'
+        if not zones:
+            self.result['flash_message'] = '未取得本期秒杀领取参数，本轮未发送'
             return
-        self.zone = min(eligible, key=lambda zone: _zone_time(zone['startTime']))
+        self.zone = min(zones, key=lambda zone: abs((_zone_time(zone['startTime'])-target).total_seconds()))
         best = None
-        for _ in range(workers):
+        limited = []
+        def create_session():
             worker = self.owner.worker_session_factory()
             self.sessions.append(worker)
             worker.headers.update(self.client.headers)
             worker.cookies.update(self.client.cookies)
+            return worker
+
+        for index in range(1, workers + 1):
+            worker = create_session()
             began = time.monotonic()
-            common = _data(self.owner._post(worker, 'info/commonInfo'))
+            try:
+                common = _data(self.owner._post(worker, 'info/commonInfo'), stage=f'第 {index} 条秒杀连接预热')
+            except CheckinError as error:
+                if error.code in FLASH_LIMIT_CODES:
+                    limited.append(error)
+                    continue
+                raise
             received = time.monotonic()
-            server = parse_server_time(common.get('sysTime')) if isinstance(common, dict) else None
-            if server is None:
-                raise CheckinError('预热未取得官方时间，本轮未提交', 'SERVER_TIME_MISSING')
-            sample = (received-began, received, server)
-            if best is None or sample[0] < best[0]:
-                best = sample
+            if start_monotonic is None:
+                server = parse_server_time(common.get('sysTime')) if isinstance(common, dict) else None
+                if server is None:
+                    raise CheckinError('预热未取得官方时间，本轮未提交', 'SERVER_TIME_MISSING')
+                sample = (received-began, received, server)
+                if best is None or sample[0] < best[0]:
+                    best = sample
             self.available.put(worker)
+            self.worker_count += 1
+        if self.worker_count == 0:
+            code = limited[-1].code if limited else 'FLASH_PREPARE_FAILED'
+            raise CheckinError(f'{workers} 条秒杀连接预热均未完成 · '
+                               f'{limited[-1] if limited else "没有可用连接"}', code)
         self.owner._current(self.snapshot)
-        _, anchor, server = best
-        # Anchor at receipt, without subtracting an assumed network delay. This
-        # follows the official clock and never deliberately sends before open.
-        self.start_monotonic = anchor + (max(target, _zone_time(self.zone['startTime']))-server).total_seconds()
-        self.end_monotonic = anchor + (_zone_time(self.zone['endTime'])-server).total_seconds()
+        if request_count is not None:
+            # Each scheduled request can acquire its own session even if no earlier request has returned.
+            for _ in range(self.worker_count, request_count):
+                self.available.put(create_session())
+        if start_monotonic is None:
+            _, anchor, server = best
+            self.start_monotonic = anchor+(target-server).total_seconds()
+        else:
+            # Scheduler calculated this once; every account in the round uses
+            # the exact same calibrated monotonic deadline.
+            self.start_monotonic = start_monotonic
+        self.end_monotonic = float('inf')
         self.ready = True
 
     @staticmethod
@@ -421,8 +476,8 @@ class PreparedFlash:
         if response.get('code') == 'SUCCESS':
             return {'state': 'success', 'code': 'SUCCESS', 'message': '秒杀领取成功，请在 APP 我的奖品中查看'}
         code = str(response.get('status') or response.get('code') or 'UNKNOWN')
-        message = '官方服务繁忙' if code == 'NET_ERROR' else RESULT_MESSAGES.get(code, '官方未允许领取（'+code[:60]+'）')
-        return {'state': 'retryable' if code in ('NET_ERROR', 'NOT_TIME_IN') else 'terminal', 'code': code, 'message': message}
+        message = '官方服务繁忙' if code == 'NET_ERROR' else _result_message(code, '官方未允许领取')
+        return {'state': 'retryable' if code in CONTINUE_FLASH_CODES else 'terminal', 'code': code, 'message': message}
 
     def reconcile(self):
         result, _ = self.owner._inspect(self.client)
